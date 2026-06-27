@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
+using UnityEditor.Build;
 #if UNITY_6000_0_OR_NEWER
 using UnityEditor.Build.Profile;
 #endif
@@ -75,57 +77,64 @@ namespace Ateo.Build
 			Debug.Log("[Build] definition='" + definition.DefinitionName + "' platform=" + definition.Platform +
 				(definition.UsesGameBuilder ? " method='" + definition.BuildMethod + "'" : " (built-in)"));
 
-			// 1. Target / profile / scripting defines. In BATCH MODE Unity cannot recompile mid-script, so
-			//    these must already be set when this method runs (CI launches Unity with -buildTarget and/or
-			//    -activeBuildProfile). We validate that here rather than switch and silently build wrong code.
-			PrepareTargetAndDefines(definition, context);
-
-			// 3. Version stamp (incl. BUILD_VERSION_NAME / ANDROID_VERSION_CODE / IOS_BUILD_NUMBER).
-			VersionStamp.Apply(context);
-
-			// 4. Android signing from env references (passwords resolved agent-side, never in the asset).
-			ApplyAndroidSigning(definition, context);
-
-			// 5. Resolve output path.
-			context.OutputPath = ResolveOutputPath(definition, context);
-
-			// 6. Pre-build steps.
-			foreach (BuildStep step in definition.PreSteps)
+			// Snapshot the settings the build mutates and restore them on the way out, so the no-clean
+			// checkout stays pristine (target/flavor/version changes never persist past the build).
+			using (new ProjectSettingsScope(definition.Platform.ToBuildTargetGroup()))
 			{
-				if (step != null) step.OnPreBuild(context);
-			}
+				// 1. Build target. In BATCH MODE Unity cannot recompile mid-script, so the target must already
+				//    be set (CI launches Unity with -buildTarget / -activeBuildProfile); we validate, not switch.
+				EnsureBuildTarget(definition, context);
 
-			// 7. Build - via the game's own method (migration shim) or the built-in pipeline.
-			BuildResult result;
-			try
-			{
-				result = definition.UsesGameBuilder ? RunGameBuilder(definition, context) : RunBuiltIn(definition, context);
-			}
-			catch (Exception exception)
-			{
-				result = BuildResult.Failed(definition.DefinitionName, exception.ToString());
-				Debug.LogError("[Build] build step threw: " + exception);
-			}
+				// 2. Scripting defines (built-in no-profile path only; profiles own their own defines).
+				ApplyDefines(definition, context);
 
-			// 8. Post-build steps (always run, success or failure).
-			foreach (BuildStep step in definition.PostSteps)
-			{
-				if (step == null) continue;
+				// 3. Version stamp (incl. BUILD_VERSION_NAME / ANDROID_VERSION_CODE / IOS_BUILD_NUMBER).
+				VersionStamp.Apply(context);
 
+				// 4. Android signing from env references (passwords resolved agent-side, never in the asset).
+				ApplyAndroidSigning(definition, context);
+
+				// 5. Resolve output path.
+				context.OutputPath = ResolveOutputPath(definition, context);
+
+				// 6. Pre-build steps.
+				foreach (BuildStep step in definition.PreSteps)
+				{
+					if (step != null) step.OnPreBuild(context);
+				}
+
+				// 7. Build - via the game's own method (migration shim) or the built-in pipeline.
+				BuildResult result;
 				try
 				{
-					step.OnPostBuild(context, result);
+					result = definition.UsesGameBuilder ? RunGameBuilder(definition, context) : RunBuiltIn(definition, context);
 				}
 				catch (Exception exception)
 				{
-					Debug.LogWarning("[Build] post-step '" + step.name + "' threw: " + exception.Message);
+					result = BuildResult.Failed(definition.DefinitionName, exception.ToString());
+					Debug.LogError("[Build] build step threw: " + exception);
 				}
-			}
 
-			result.DurationSeconds = stopwatch.ElapsedMilliseconds / 1000;
-			Debug.Log("[Build] " + (result.Success ? "SUCCESS" : "FAILURE") + " in " + result.DurationSeconds +
-				"s" + (result.Success ? " -> " + result.ArtifactPath : ""));
-			return result;
+				// 8. Post-build steps (always run, success or failure).
+				foreach (BuildStep step in definition.PostSteps)
+				{
+					if (step == null) continue;
+
+					try
+					{
+						step.OnPostBuild(context, result);
+					}
+					catch (Exception exception)
+					{
+						Debug.LogWarning("[Build] post-step '" + step.name + "' threw: " + exception.Message);
+					}
+				}
+
+				result.DurationSeconds = stopwatch.ElapsedMilliseconds / 1000;
+				Debug.Log("[Build] " + (result.Success ? "SUCCESS" : "FAILURE") + " in " + result.DurationSeconds +
+					"s" + (result.Success ? " -> " + result.ArtifactPath : ""));
+				return result;
+			}
 		}
 
 		#endregion
@@ -281,10 +290,10 @@ namespace Ateo.Build
 
 		#region Private Methods - Apply Definition Settings
 
-		private static void PrepareTargetAndDefines(BuildDefinition definition, BuildContext context)
+		private static void EnsureBuildTarget(BuildDefinition definition, BuildContext context)
 		{
 #if UNITY_6000_0_OR_NEWER
-			// Profile builds get target + scenes + defines from the (pre-activated) profile - see RunWithProfile.
+			// Profile builds get their target from the (pre-activated) profile - see RunWithProfile.
 			if (definition.Profile != null) return;
 #endif
 			BuildTarget target = definition.Platform.ToBuildTarget();
@@ -300,6 +309,51 @@ namespace Ateo.Build
 				Debug.Log("[Build] switching active build target -> " + target + " (a recompile follows)");
 				EditorUserBuildSettings.SwitchActiveBuildTarget(definition.Platform.ToBuildTargetGroup(), target);
 			}
+		}
+
+		/// <summary>
+		/// Adds/removes scripting defines for the built-in, no-profile path. Player defines DO take effect in
+		/// batch mode (BuildPlayer compiles the player with the current symbols); the surrounding
+		/// <see cref="ProjectSettingsScope"/> restores the originals afterwards. Profiles own their defines;
+		/// the shim lets the game's builder own them - so this is a no-op for those.
+		/// </summary>
+		private static void ApplyDefines(BuildDefinition definition, BuildContext context)
+		{
+#if UNITY_6000_0_OR_NEWER
+			if (definition.Profile != null) return;
+#endif
+			if (definition.UsesGameBuilder) return;
+
+			IReadOnlyList<string> include = definition.IncludeDefines;
+			IReadOnlyList<string> exclude = definition.ExcludeDefines;
+			bool hasInclude = include != null && include.Count > 0;
+			bool hasExclude = exclude != null && exclude.Count > 0;
+			if (!hasInclude && !hasExclude) return;
+
+			NamedBuildTarget namedTarget = NamedBuildTarget.FromBuildTargetGroup(definition.Platform.ToBuildTargetGroup());
+			PlayerSettings.GetScriptingDefineSymbols(namedTarget, out string[] current);
+			List<string> defines = current.ToList();
+
+			if (hasInclude)
+			{
+				foreach (string define in include)
+				{
+					string trimmed = define?.Trim();
+					if (!string.IsNullOrEmpty(trimmed) && !defines.Contains(trimmed)) defines.Add(trimmed);
+				}
+			}
+
+			if (hasExclude)
+			{
+				foreach (string define in exclude)
+				{
+					string trimmed = define?.Trim();
+					if (!string.IsNullOrEmpty(trimmed)) defines.Remove(trimmed);
+				}
+			}
+
+			PlayerSettings.SetScriptingDefineSymbols(namedTarget, defines.ToArray());
+			Debug.Log("[Build] scripting defines (" + namedTarget.TargetName + "): " + string.Join(";", defines));
 		}
 
 		private static void ApplyAndroidSigning(BuildDefinition definition, BuildContext context)

@@ -37,6 +37,13 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Legacy fallback when no Build Profile is set: explicit scene list. Empty = use EditorBuildSettings.")]
 		private SceneAsset[] _scenes;
 
+		[SerializeField, Tooltip("Scripting defines to ADD for this build. Built-in path only, and only when NO Build " +
+			"Profile is set (profiles carry their own defines). The original define set is restored after the build.")]
+		private string[] _includeDefines;
+
+		[SerializeField, Tooltip("Scripting defines to REMOVE for this build. Same scope/restore as Include Defines.")]
+		private string[] _excludeDefines;
+
 		[SerializeField, Tooltip("Output file name without extension. Tokens: {project} {version} {code}. Empty = builder default.")]
 		private string _outputFileName;
 
@@ -70,6 +77,8 @@ namespace Ateo.Build
 		public BuildProfile Profile => _buildProfile;
 #endif
 		public IReadOnlyList<SceneAsset> Scenes => _scenes;
+		public IReadOnlyList<string> IncludeDefines => _includeDefines;
+		public IReadOnlyList<string> ExcludeDefines => _excludeDefines;
 		public string OutputFileName => _outputFileName;
 		public AndroidSigning Signing => _androidSigning;
 		public IReadOnlyList<BuildStep> PreSteps => _preSteps;
