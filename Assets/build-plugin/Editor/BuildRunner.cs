@@ -363,7 +363,7 @@ namespace Ateo.Build
 			AndroidSigning signing = definition.Signing;
 			string keystorePath = Path.IsPathRooted(signing.KeystoreFile)
 				? signing.KeystoreFile
-				: Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), signing.KeystoreFile));
+				: Path.GetFullPath(Path.Combine(CheckoutRoot(), signing.KeystoreFile));
 			string storePass = Environment.GetEnvironmentVariable(signing.KeystorePasswordEnvOrDefault);
 			string aliasPass = Environment.GetEnvironmentVariable(signing.KeyAliasPasswordEnvOrDefault);
 			if (string.IsNullOrEmpty(aliasPass)) aliasPass = storePass;
@@ -401,7 +401,7 @@ namespace Ateo.Build
 					.Replace("{code}", context.VersionCode.ToString());
 
 			// Output under the checkout's Builds/Output/<Platform>/ staging (matches the server's artifact rules).
-			string directory = Path.Combine(Directory.GetCurrentDirectory(), "Builds", "Output", definition.Platform.ToServerToken());
+			string directory = Path.Combine(CheckoutRoot(), "Builds", "Output", definition.Platform.ToServerToken());
 			Directory.CreateDirectory(directory);
 			return Path.Combine(directory, fileName + extension);
 		}
@@ -433,7 +433,7 @@ namespace Ateo.Build
 
 		private static string FindArtifact(BuildContext context)
 		{
-			string directory = Path.Combine(Directory.GetCurrentDirectory(), "Builds");
+			string directory = Path.Combine(CheckoutRoot(), "Builds");
 			if (!Directory.Exists(directory)) return "";
 
 			string pattern = context.Platform == BuildPlatform.Android
@@ -445,6 +445,18 @@ namespace Ateo.Build
 		#endregion
 
 		#region Private Methods - Utilities
+
+		/// <summary>
+		/// Root for repo-relative paths (build output, keystore). CI sets BUILD_CHECKOUT_ROOT to the TeamCity
+		/// checkout dir so artifacts/keystores resolve there; locally we fall back to the Unity project root
+		/// (parent of Assets). Never the process cwd - CI launches Unity with a neutral working dir, so cwd is
+		/// not the checkout.
+		/// </summary>
+		private static string CheckoutRoot()
+		{
+			string root = Environment.GetEnvironmentVariable("BUILD_CHECKOUT_ROOT");
+			return string.IsNullOrEmpty(root) ? Directory.GetParent(Application.dataPath).FullName : root;
+		}
 
 		private static string GetArg(string flag)
 		{
