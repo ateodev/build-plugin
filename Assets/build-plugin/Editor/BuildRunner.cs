@@ -6,6 +6,9 @@ using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.Build;
+#if UNITY_6000_0_OR_NEWER
+using UnityEditor.Build.Profile;
+#endif
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -74,16 +77,10 @@ namespace Ateo.Build
 			Debug.Log("[Build] definition='" + definition.DefinitionName + "' platform=" + definition.Platform +
 				(definition.UsesGameBuilder ? " method='" + definition.BuildMethod + "'" : " (built-in)"));
 
-			// 1. Active build target.
-			BuildTarget target = definition.Platform.ToBuildTarget();
-			if (EditorUserBuildSettings.activeBuildTarget != target)
-			{
-				Debug.Log("[Build] switching active build target -> " + target);
-				EditorUserBuildSettings.SwitchActiveBuildTarget(definition.Platform.ToBuildTargetGroup(), target);
-			}
-
-			// 2. Layered scripting defines.
-			ApplyExtraDefines(definition);
+			// 1. Target / profile / scripting defines. In BATCH MODE Unity cannot recompile mid-script, so
+			//    these must already be set when this method runs (CI launches Unity with -buildTarget and/or
+			//    -activeBuildProfile). We validate that here rather than switch and silently build wrong code.
+			PrepareTargetAndDefines(definition, context);
 
 			// 3. Version stamp (incl. BUILD_VERSION_NAME / ANDROID_VERSION_CODE / IOS_BUILD_NUMBER).
 			VersionStamp.Apply(context);
@@ -139,6 +136,16 @@ namespace Ateo.Build
 
 		private static BuildResult RunBuiltIn(BuildDefinition definition, BuildContext context)
 		{
+#if UNITY_6000_0_OR_NEWER
+			// Unity 6 Build Profile is the preferred L0: target, scenes, defines and player-setting overrides
+			// all come from the profile (which must already be active - see RunWithProfile).
+			if (definition.Profile != null)
+			{
+				return RunWithProfile(definition, context);
+			}
+#endif
+
+			// Legacy path: no profile, build from the definition's scene list for the active target.
 			if (definition.Platform == BuildPlatform.Android)
 			{
 				EditorUserBuildSettings.buildAppBundle = definition.Output == AndroidOutput.AAB;
@@ -173,6 +180,62 @@ namespace Ateo.Build
 				Error = succeeded ? null : ("BuildPipeline result=" + summary.result + " errors=" + summary.totalErrors)
 			};
 		}
+
+#if UNITY_6000_0_OR_NEWER
+		/// <summary>
+		/// Build from a Unity 6 Build Profile. The profile carries target + scenes + defines + player-setting
+		/// overrides, but those only apply once the profile is ACTIVE - and activating it triggers a recompile
+		/// + domain reload that CANNOT happen mid-script in batch mode. So CI must launch Unity with
+		/// <c>-activeBuildProfile &lt;path&gt;</c> (the executor passes the path the panel sends as
+		/// <c>unitybuild.buildProfile</c>); we only build, never switch, in batch mode. The build target is the
+		/// profile's, so we do not set it.
+		/// </summary>
+		private static BuildResult RunWithProfile(BuildDefinition definition, BuildContext context)
+		{
+			BuildProfile profile = definition.Profile;
+			BuildProfile active = BuildProfile.GetActiveBuildProfile();
+
+			if (active != profile)
+			{
+				string profilePath = AssetDatabase.GetAssetPath(profile);
+				if (context.IsBatchMode)
+				{
+					throw new Exception("Build profile '" + profile.name + "' is not active. In batch mode it must be " +
+						"pre-activated - launch Unity with -activeBuildProfile \"" + profilePath + "\" (the recompile that " +
+						"activation needs cannot happen mid-script in batch mode). Active profile: '" +
+						(active != null ? active.name : "<none>") + "'.");
+				}
+
+				// Interactive Editor: activating recompiles + reloads the domain, so we cannot build in this same
+				// call. The Build Panel will resume after the reload; for now activate and ask the user to re-run.
+				BuildProfile.SetActiveBuildProfile(profile);
+				throw new Exception("Activated build profile '" + profile.name + "' - it triggers a script recompile. " +
+					"Run the build again once scripts finish reloading (seamless local profile builds arrive with the Build Panel).");
+			}
+
+			BuildPlayerWithProfileOptions options = new BuildPlayerWithProfileOptions
+			{
+				buildProfile = profile,
+				locationPathName = context.OutputPath,
+				options = BuildOptions.None
+			};
+
+			UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(options);
+			UnityEditor.Build.Reporting.BuildSummary summary = report.summary;
+			bool succeeded = summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded;
+
+			return new BuildResult
+			{
+				Success = succeeded,
+				DefinitionName = definition.DefinitionName,
+				Platform = definition.Platform.ToServerToken(),
+				ArtifactPath = succeeded ? summary.outputPath : "",
+				VersionName = context.VersionName,
+				VersionCode = context.VersionCode,
+				Error = succeeded ? null : ("BuildPipeline result=" + summary.result + " errors=" + summary.totalErrors)
+			};
+		}
+#endif
 
 		/// <summary>
 		/// Migration escape hatch: invoke a game's existing static headless builder (e.g.
@@ -220,10 +283,43 @@ namespace Ateo.Build
 
 		#region Private Methods - Apply Definition Settings
 
-		private static void ApplyExtraDefines(BuildDefinition definition)
+		private static void PrepareTargetAndDefines(BuildDefinition definition, BuildContext context)
+		{
+#if UNITY_6000_0_OR_NEWER
+			// Profile builds get target + scenes + defines from the (pre-activated) profile - see RunWithProfile.
+			if (definition.Profile != null) return;
+#endif
+			BuildTarget target = definition.Platform.ToBuildTarget();
+			if (EditorUserBuildSettings.activeBuildTarget != target)
+			{
+				if (context.IsBatchMode)
+				{
+					throw new Exception("Active build target is " + EditorUserBuildSettings.activeBuildTarget +
+						" but the definition targets " + target + ". In batch mode launch Unity with -buildTarget " +
+						target + " (the target cannot be switched mid-script in batch mode).");
+				}
+
+				Debug.Log("[Build] switching active build target -> " + target + " (a recompile follows)");
+				EditorUserBuildSettings.SwitchActiveBuildTarget(definition.Platform.ToBuildTargetGroup(), target);
+			}
+
+			ApplyExtraDefines(definition, context);
+		}
+
+		private static void ApplyExtraDefines(BuildDefinition definition, BuildContext context)
 		{
 			IReadOnlyList<string> extraDefines = definition.ExtraScriptingDefines;
 			if (extraDefines == null || extraDefines.Count == 0) return;
+
+			if (context.IsBatchMode)
+			{
+				// Scripting defines only take effect after a recompile, which cannot happen mid-script in batch
+				// mode - so defines set here are NOT compiled into this build. Put build-specific defines in the
+				// Build Profile (activated via -activeBuildProfile) instead. Warn loudly rather than build wrong.
+				Debug.LogWarning("[Build] extraScriptingDefines are IGNORED in batch mode (no mid-script recompile) - " +
+					"put them in the Build Profile. Ignored: " + string.Join(";", extraDefines));
+				return;
+			}
 
 			NamedBuildTarget namedTarget = NamedBuildTarget.FromBuildTargetGroup(definition.Platform.ToBuildTargetGroup());
 			List<string> defines = PlayerSettings.GetScriptingDefineSymbols(namedTarget)
