@@ -235,10 +235,30 @@ namespace Ateo.Build
 
 		private async Task RefreshBuildsAsync()
 		{
+			// Query the manual fallback (if set) plus every auto-discovered executor; never an empty id.
+			List<string> targets = new List<string>();
+			if (!string.IsNullOrEmpty(BuildServerSettings.BuildTypeId)) targets.Add(BuildServerSettings.BuildTypeId);
+			foreach (string id in _executors.Values)
+			{
+				if (!string.IsNullOrEmpty(id) && !targets.Contains(id)) targets.Add(id);
+			}
+
+			if (targets.Count == 0)
+			{
+				_status = "No executor to query. Run Test Connection to discover executors, or set one.";
+				return;
+			}
+
 			using (TeamCityClient client = NewClient())
 			{
-				_builds = await client.ListBuildsAsync(BuildServerSettings.BuildTypeId, null, 20);
-				_status = "Loaded " + _builds.Count + " build(s).";
+				List<BuildStatus> all = new List<BuildStatus>();
+				foreach (string id in targets)
+				{
+					all.AddRange(await client.ListBuildsAsync(id, null, 10));
+				}
+
+				_builds = all;
+				_status = "Loaded " + _builds.Count + " build(s) from " + targets.Count + " executor(s).";
 			}
 		}
 

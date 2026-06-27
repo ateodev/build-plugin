@@ -17,3 +17,7 @@ v1 skeleton.
 - In-Editor Build Panel and built-in `BuildStep` implementations (v2).
 - iOS / standalone output-path specifics beyond Android AAB/APK.
 </content>
+
+## [0.1.1] - 2026-06-27
+### Fixed
+- Build Panel: Refresh Builds queried an empty buildTypeId when no manual executor was set; now queries the auto-discovered executors (+ manual fallback).

@@ -1,6 +1,6 @@
 {
   "name": "com.ateo.build",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "Ateo Build",
   "description": "In-repo build definitions and a unified headless build entry point for the Ateo Unity build server. Builds are authored as committed ScriptableObjects; CI and local builds run through the same code path. Distributed as a UPM git package, pinned per project.",
   "unity": "6000.0",
