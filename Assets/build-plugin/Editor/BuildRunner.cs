@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -10,329 +11,391 @@ using Debug = UnityEngine.Debug;
 
 namespace Ateo.Build
 {
-    /// <summary>
-    /// The single generic headless entry point (L2). CI always calls the SAME method regardless of game or
-    /// platform:
-    ///   Unity ... -executeMethod Ateo.Build.BuildRunner.Run -buildDefinition "Android-AAB-Release"
-    ///             [-buildResult "&lt;path&gt;.json"]
-    /// It loads the named <see cref="BuildDefinition"/> from the project, applies it (target, defines,
-    /// version stamp, signing), runs pre-steps, builds (built-in or via a game's own method shim), runs
-    /// post-steps, writes a machine-readable <see cref="BuildResult"/>, and sets the process exit code.
-    /// The exact same path runs for an in-editor local build via <see cref="RunDefinition"/> - that local/CI
-    /// parity is the whole point.
-    /// </summary>
-    public static class BuildRunner
-    {
-        /// <summary>CI entry. Reads -buildDefinition / -buildResult from the command line.</summary>
-        public static void Run()
-        {
-            var defName = GetArg("-buildDefinition");
-            var resultPath = GetArg("-buildResult");
-            BuildResult result;
+	/// <summary>
+	/// The single generic headless entry point (L2). CI always calls the SAME method regardless of game or
+	/// platform:
+	///   Unity ... -executeMethod Ateo.Build.BuildRunner.Run -buildDefinition "Android-AAB-Release"
+	///             [-buildResult "&lt;path&gt;.json"]
+	/// It loads the named <see cref="BuildDefinition"/> from the project, applies it (target, defines, version
+	/// stamp, signing), runs pre-steps, builds (built-in or via a game's own method shim), runs post-steps,
+	/// writes a machine-readable <see cref="BuildResult"/>, and sets the process exit code. The exact same
+	/// path runs for an in-editor local build via <see cref="RunDefinition"/> - that local/CI parity is the
+	/// whole point.
+	/// </summary>
+	public static class BuildRunner
+	{
+		#region Public Methods
 
-            try
-            {
-                if (string.IsNullOrEmpty(defName))
-                    throw new Exception("Missing -buildDefinition <name> argument.");
+		/// <summary>CI entry. Reads -buildDefinition / -buildResult from the command line.</summary>
+		public static void Run()
+		{
+			string definitionName = GetArg("-buildDefinition");
+			string resultPath = GetArg("-buildResult");
+			BuildResult result;
 
-                var def = FindDefinition(defName);
-                if (def == null)
-                    throw new Exception("Build definition '" + defName + "' not found. Expected a BuildDefinition " +
-                                        "asset with definitionName == '" + defName + "' (usually under Assets/BuildConfigs/).");
+			try
+			{
+				if (string.IsNullOrEmpty(definitionName)) throw new Exception("Missing -buildDefinition <name> argument.");
 
-                result = RunDefinition(def);
-            }
-            catch (Exception e)
-            {
-                result = BuildResult.Failed(defName, e.ToString());
-                Debug.LogError("[Build] FAILED: " + e);
-            }
+				BuildDefinition definition = FindDefinition(definitionName);
+				if (definition == null)
+				{
+					throw new Exception("Build definition '" + definitionName + "' not found. Expected a BuildDefinition " +
+						"asset whose name == '" + definitionName + "' (usually under Assets/BuildConfigs/).");
+				}
 
-            if (!string.IsNullOrEmpty(resultPath))
-                result.WriteJson(resultPath);
+				result = RunDefinition(definition);
+			}
+			catch (Exception exception)
+			{
+				result = BuildResult.Failed(definitionName, exception.ToString());
+				Debug.LogError("[Build] FAILED: " + exception);
+			}
 
-            if (Application.isBatchMode)
-                EditorApplication.Exit(result.success ? 0 : 1);
-        }
+			if (!string.IsNullOrEmpty(resultPath)) result.WriteJson(resultPath);
 
-        /// <summary>
-        /// Build a definition through the full pipeline. Shared by CI (<see cref="Run"/>) and local builds
-        /// (the Editor panel in a later version), so both go through identical logic.
-        /// </summary>
-        public static BuildResult RunDefinition(BuildDefinition def)
-        {
-            var sw = Stopwatch.StartNew();
-            var ctx = new BuildContext
-            {
-                definition = def,
-                project = FindProjectConfig(),
-                isBatchMode = Application.isBatchMode
-            };
+			if (Application.isBatchMode) EditorApplication.Exit(result.Success ? 0 : 1);
+		}
 
-            Debug.Log("[Build] definition='" + def.definitionName + "' platform=" + def.platform +
-                      (def.UsesGameBuilder ? " method='" + def.buildMethod + "'" : " (built-in)"));
+		/// <summary>
+		/// Build a definition through the full pipeline. Shared by CI (<see cref="Run"/>) and local builds
+		/// (the Editor panel in a later version), so both go through identical logic.
+		/// </summary>
+		public static BuildResult RunDefinition(BuildDefinition definition)
+		{
+			Stopwatch stopwatch = Stopwatch.StartNew();
+			BuildContext context = new BuildContext
+			{
+				Definition = definition,
+				Project = FindProjectConfig(),
+				IsBatchMode = Application.isBatchMode
+			};
 
-            // 1. Active build target.
-            var target = def.platform.ToBuildTarget();
-            if (EditorUserBuildSettings.activeBuildTarget != target)
-            {
-                Debug.Log("[Build] switching active build target -> " + target);
-                EditorUserBuildSettings.SwitchActiveBuildTarget(def.platform.ToBuildTargetGroup(), target);
-            }
+			Debug.Log("[Build] definition='" + definition.DefinitionName + "' platform=" + definition.Platform +
+				(definition.UsesGameBuilder ? " method='" + definition.BuildMethod + "'" : " (built-in)"));
 
-            // 2. Layered scripting defines.
-            ApplyExtraDefines(def);
+			// 1. Active build target.
+			BuildTarget target = definition.Platform.ToBuildTarget();
+			if (EditorUserBuildSettings.activeBuildTarget != target)
+			{
+				Debug.Log("[Build] switching active build target -> " + target);
+				EditorUserBuildSettings.SwitchActiveBuildTarget(definition.Platform.ToBuildTargetGroup(), target);
+			}
 
-            // 3. Version stamp (incl. BUILD_VERSION_NAME / ANDROID_VERSION_CODE / IOS_BUILD_NUMBER).
-            VersionStamp.Apply(ctx);
+			// 2. Layered scripting defines.
+			ApplyExtraDefines(definition);
 
-            // 4. Android signing from env references (passwords resolved agent-side, never in the asset).
-            ApplyAndroidSigning(def, ctx);
+			// 3. Version stamp (incl. BUILD_VERSION_NAME / ANDROID_VERSION_CODE / IOS_BUILD_NUMBER).
+			VersionStamp.Apply(context);
 
-            // 5. Resolve output path.
-            ctx.outputPath = ResolveOutputPath(def, ctx);
+			// 4. Android signing from env references (passwords resolved agent-side, never in the asset).
+			ApplyAndroidSigning(definition, context);
 
-            // 6. Pre-build steps.
-            foreach (var step in def.preSteps)
-                if (step != null) step.OnPreBuild(ctx);
+			// 5. Resolve output path.
+			context.OutputPath = ResolveOutputPath(definition, context);
 
-            // 7. Build - via the game's own method (migration shim) or the built-in pipeline.
-            BuildResult result;
-            try
-            {
-                result = def.UsesGameBuilder ? RunGameBuilder(def, ctx) : RunBuiltIn(def, ctx);
-            }
-            catch (Exception e)
-            {
-                result = BuildResult.Failed(def.definitionName, e.ToString());
-                Debug.LogError("[Build] build step threw: " + e);
-            }
+			// 6. Pre-build steps.
+			foreach (BuildStep step in definition.PreSteps)
+			{
+				if (step != null) step.OnPreBuild(context);
+			}
 
-            // 8. Post-build steps (always run, success or failure).
-            foreach (var step in def.postSteps)
-            {
-                if (step == null) continue;
-                try { step.OnPostBuild(ctx, result); }
-                catch (Exception e) { Debug.LogWarning("[Build] post-step '" + step.name + "' threw: " + e.Message); }
-            }
+			// 7. Build - via the game's own method (migration shim) or the built-in pipeline.
+			BuildResult result;
+			try
+			{
+				result = definition.UsesGameBuilder ? RunGameBuilder(definition, context) : RunBuiltIn(definition, context);
+			}
+			catch (Exception exception)
+			{
+				result = BuildResult.Failed(definition.DefinitionName, exception.ToString());
+				Debug.LogError("[Build] build step threw: " + exception);
+			}
 
-            result.durationSeconds = sw.ElapsedMilliseconds / 1000;
-            Debug.Log("[Build] " + (result.success ? "SUCCESS" : "FAILURE") + " in " + result.durationSeconds +
-                      "s" + (result.success ? " -> " + result.artifactPath : ""));
-            return result;
-        }
+			// 8. Post-build steps (always run, success or failure).
+			foreach (BuildStep step in definition.PostSteps)
+			{
+				if (step == null) continue;
 
-        // ---- build paths -------------------------------------------------------------------------------
+				try
+				{
+					step.OnPostBuild(context, result);
+				}
+				catch (Exception exception)
+				{
+					Debug.LogWarning("[Build] post-step '" + step.name + "' threw: " + exception.Message);
+				}
+			}
 
-        static BuildResult RunBuiltIn(BuildDefinition def, BuildContext ctx)
-        {
-            if (def.platform == BuildPlatform.Android)
-                EditorUserBuildSettings.buildAppBundle = def.androidOutput == AndroidOutput.AAB;
+			result.DurationSeconds = stopwatch.ElapsedMilliseconds / 1000;
+			Debug.Log("[Build] " + (result.Success ? "SUCCESS" : "FAILURE") + " in " + result.DurationSeconds +
+				"s" + (result.Success ? " -> " + result.ArtifactPath : ""));
+			return result;
+		}
 
-            var options = new BuildPlayerOptions
-            {
-                scenes = def.GetScenePaths(),
-                locationPathName = ctx.outputPath,
-                target = def.platform.ToBuildTarget(),
-                targetGroup = def.platform.ToBuildTargetGroup(),
-                options = BuildOptions.None
-            };
+		#endregion
 
-            if (options.scenes == null || options.scenes.Length == 0)
-                throw new Exception("No scenes to build (definition has no scenes and EditorBuildSettings is empty).");
+		#region Private Methods - Build Paths
 
-            var report = BuildPipeline.BuildPlayer(options);
-            var summary = report.summary;
-            var ok = summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded;
+		private static BuildResult RunBuiltIn(BuildDefinition definition, BuildContext context)
+		{
+			if (definition.Platform == BuildPlatform.Android)
+			{
+				EditorUserBuildSettings.buildAppBundle = definition.Output == AndroidOutput.AAB;
+			}
 
-            return new BuildResult
-            {
-                success = ok,
-                definitionName = def.definitionName,
-                platform = def.platform.ToServerToken(),
-                artifactPath = ok ? ctx.outputPath : "",
-                versionName = ctx.versionName,
-                versionCode = ctx.versionCode,
-                error = ok ? null : ("BuildPipeline result=" + summary.result + " errors=" + summary.totalErrors)
-            };
-        }
+			BuildPlayerOptions options = new BuildPlayerOptions
+			{
+				scenes = definition.GetScenePaths(),
+				locationPathName = context.OutputPath,
+				target = definition.Platform.ToBuildTarget(),
+				targetGroup = definition.Platform.ToBuildTargetGroup(),
+				options = BuildOptions.None
+			};
 
-        /// <summary>
-        /// Migration escape hatch: invoke a game's existing static headless builder (e.g.
-        /// "AndroidBuilder.BuildFromCommandLine") instead of the built-in pipeline. The game's builder reads
-        /// its own env/args; we just call it and report success if it didn't throw. Lets projects adopt the
-        /// definition/CI model without rewriting their builder first.
-        /// </summary>
-        static BuildResult RunGameBuilder(BuildDefinition def, BuildContext ctx)
-        {
-            var (typeName, methodName) = SplitMethod(def.buildMethod);
-            var type = FindType(typeName)
-                       ?? throw new Exception("Build method type not found: '" + typeName + "'");
-            var method = type.GetMethod(methodName,
-                             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-                         ?? throw new Exception("Static method not found: '" + typeName + "." + methodName + "'");
+			if (options.scenes == null || options.scenes.Length == 0)
+			{
+				throw new Exception("No scenes to build (definition has no scenes and EditorBuildSettings is empty).");
+			}
 
-            Debug.Log("[Build] invoking game builder " + typeName + "." + methodName +
-                      (string.IsNullOrEmpty(def.buildMethodArgs) ? "" : " (args: " + def.buildMethodArgs + ")"));
-            // Pass args only if the method accepts a single string[] / string; otherwise call parameterless.
-            var ps = method.GetParameters();
-            if (ps.Length == 1 && ps[0].ParameterType == typeof(string[]))
-                method.Invoke(null, new object[] { SplitArgs(def.buildMethodArgs) });
-            else if (ps.Length == 1 && ps[0].ParameterType == typeof(string))
-                method.Invoke(null, new object[] { def.buildMethodArgs ?? "" });
-            else
-                method.Invoke(null, null);
+			UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(options);
+			UnityEditor.Build.Reporting.BuildSummary summary = report.summary;
+			bool succeeded = summary.result == UnityEditor.Build.Reporting.BuildResult.Succeeded;
 
-            return new BuildResult
-            {
-                success = true,
-                definitionName = def.definitionName,
-                platform = def.platform.ToServerToken(),
-                artifactPath = FindArtifact(ctx),
-                versionName = ctx.versionName,
-                versionCode = ctx.versionCode
-            };
-        }
+			return new BuildResult
+			{
+				Success = succeeded,
+				DefinitionName = definition.DefinitionName,
+				Platform = definition.Platform.ToServerToken(),
+				ArtifactPath = succeeded ? context.OutputPath : "",
+				VersionName = context.VersionName,
+				VersionCode = context.VersionCode,
+				Error = succeeded ? null : ("BuildPipeline result=" + summary.result + " errors=" + summary.totalErrors)
+			};
+		}
 
-        // ---- application of definition settings --------------------------------------------------------
+		/// <summary>
+		/// Migration escape hatch: invoke a game's existing static headless builder (e.g.
+		/// "AndroidBuilder.BuildFromCommandLine") instead of the built-in pipeline. The game's builder reads
+		/// its own env/args; we just call it and report success if it didn't throw. Lets projects adopt the
+		/// definition/CI model without rewriting their builder first.
+		/// </summary>
+		private static BuildResult RunGameBuilder(BuildDefinition definition, BuildContext context)
+		{
+			(string typeName, string methodName) = SplitMethod(definition.BuildMethod);
+			Type type = FindType(typeName) ?? throw new Exception("Build method type not found: '" + typeName + "'");
+			MethodInfo method = type.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+				?? throw new Exception("Static method not found: '" + typeName + "." + methodName + "'");
 
-        static void ApplyExtraDefines(BuildDefinition def)
-        {
-            if (def.extraScriptingDefines == null || def.extraScriptingDefines.Length == 0) return;
-            var named = NamedBuildTarget.FromBuildTargetGroup(def.platform.ToBuildTargetGroup());
-            var current = PlayerSettings.GetScriptingDefineSymbols(named)
-                .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
-                .ToList();
-            foreach (var d in def.extraScriptingDefines)
-                if (!string.IsNullOrWhiteSpace(d) && !current.Contains(d.Trim()))
-                    current.Add(d.Trim());
-            PlayerSettings.SetScriptingDefineSymbols(named, current.ToArray());
-            Debug.Log("[Build] scripting defines (" + named.TargetName + "): " + string.Join(";", current));
-        }
+			Debug.Log("[Build] invoking game builder " + typeName + "." + methodName +
+				(string.IsNullOrEmpty(definition.BuildMethodArgs) ? "" : " (args: " + definition.BuildMethodArgs + ")"));
 
-        static void ApplyAndroidSigning(BuildDefinition def, BuildContext ctx)
-        {
-            if (def.platform != BuildPlatform.Android || !def.androidSigning.IsConfigured) return;
-            var s = def.androidSigning;
-            var keystorePath = Path.IsPathRooted(s.keystoreFile)
-                ? s.keystoreFile
-                : Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), s.keystoreFile));
-            var storePass = Environment.GetEnvironmentVariable(s.KeystorePasswordEnvOrDefault);
-            var aliasPass = Environment.GetEnvironmentVariable(s.KeyAliasPasswordEnvOrDefault);
-            if (string.IsNullOrEmpty(aliasPass)) aliasPass = storePass;
+			// Pass args only if the method accepts a single string[] / string; otherwise call parameterless.
+			ParameterInfo[] parameters = method.GetParameters();
+			if (parameters.Length == 1 && parameters[0].ParameterType == typeof(string[]))
+			{
+				method.Invoke(null, new object[] { SplitArgs(definition.BuildMethodArgs) });
+			}
+			else if (parameters.Length == 1 && parameters[0].ParameterType == typeof(string))
+			{
+				method.Invoke(null, new object[] { definition.BuildMethodArgs ?? "" });
+			}
+			else
+			{
+				method.Invoke(null, null);
+			}
 
-            if (string.IsNullOrEmpty(storePass))
-            {
-                Debug.LogWarning("[Build] Android signing configured but env '" + s.KeystorePasswordEnvOrDefault +
-                                 "' is empty - the build may fall back to a debug keystore.");
-                return;
-            }
+			return new BuildResult
+			{
+				Success = true,
+				DefinitionName = definition.DefinitionName,
+				Platform = definition.Platform.ToServerToken(),
+				ArtifactPath = FindArtifact(context),
+				VersionName = context.VersionName,
+				VersionCode = context.VersionCode
+			};
+		}
 
-            PlayerSettings.Android.useCustomKeystore = true;
-            PlayerSettings.Android.keystoreName = keystorePath;
-            PlayerSettings.Android.keystorePass = storePass;
-            PlayerSettings.Android.keyaliasName = s.keyAlias;
-            PlayerSettings.Android.keyaliasPass = aliasPass;
-            Debug.Log("[Build] Android signing applied (keystore=" + keystorePath + ", alias=" + s.keyAlias + ").");
-        }
+		#endregion
 
-        static string ResolveOutputPath(BuildDefinition def, BuildContext ctx)
-        {
-            var ext = def.platform == BuildPlatform.Android
-                ? (def.androidOutput == AndroidOutput.AAB ? ".aab" : ".apk")
-                : ""; // iOS/standalone produce a folder; refined per-platform later.
+		#region Private Methods - Apply Definition Settings
 
-            var fileName = string.IsNullOrEmpty(def.outputFileName)
-                ? SanitizeFileName(Application.productName) + "_" + ctx.versionName + "_vc" + ctx.versionCode
-                : def.outputFileName
-                    .Replace("{project}", SanitizeFileName(Application.productName))
-                    .Replace("{version}", ctx.versionName)
-                    .Replace("{code}", ctx.versionCode.ToString());
+		private static void ApplyExtraDefines(BuildDefinition definition)
+		{
+			IReadOnlyList<string> extraDefines = definition.ExtraScriptingDefines;
+			if (extraDefines == null || extraDefines.Count == 0) return;
 
-            // Output under the checkout's Builds/Output/<Platform>/ staging (matches the server's artifact rules).
-            var dir = Path.Combine(Directory.GetCurrentDirectory(), "Builds", "Output", def.platform.ToServerToken());
-            Directory.CreateDirectory(dir);
-            return Path.Combine(dir, fileName + ext);
-        }
+			NamedBuildTarget namedTarget = NamedBuildTarget.FromBuildTargetGroup(definition.Platform.ToBuildTargetGroup());
+			List<string> defines = PlayerSettings.GetScriptingDefineSymbols(namedTarget)
+				.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+				.ToList();
 
-        // ---- discovery helpers -------------------------------------------------------------------------
+			foreach (string define in extraDefines)
+			{
+				if (!string.IsNullOrWhiteSpace(define) && !defines.Contains(define.Trim()))
+				{
+					defines.Add(define.Trim());
+				}
+			}
 
-        static BuildDefinition FindDefinition(string name)
-        {
-            foreach (var guid in AssetDatabase.FindAssets("t:" + nameof(BuildDefinition)))
-            {
-                var path = AssetDatabase.GUIDToAssetPath(guid);
-                var def = AssetDatabase.LoadAssetAtPath<BuildDefinition>(path);
-                if (def != null && def.definitionName == name) return def;
-            }
-            return null;
-        }
+			PlayerSettings.SetScriptingDefineSymbols(namedTarget, defines.ToArray());
+			Debug.Log("[Build] scripting defines (" + namedTarget.TargetName + "): " + string.Join(";", defines));
+		}
 
-        static ProjectConfig FindProjectConfig()
-        {
-            var guids = AssetDatabase.FindAssets("t:" + nameof(ProjectConfig));
-            if (guids.Length == 0) return null;
-            if (guids.Length > 1)
-                Debug.LogWarning("[Build] multiple ProjectConfig assets found; using the first.");
-            return AssetDatabase.LoadAssetAtPath<ProjectConfig>(AssetDatabase.GUIDToAssetPath(guids[0]));
-        }
+		private static void ApplyAndroidSigning(BuildDefinition definition, BuildContext context)
+		{
+			if (definition.Platform != BuildPlatform.Android || !definition.Signing.IsConfigured) return;
 
-        static string FindArtifact(BuildContext ctx)
-        {
-            var dir = Path.Combine(Directory.GetCurrentDirectory(), "Builds");
-            if (!Directory.Exists(dir)) return "";
-            var pattern = ctx.Platform == BuildPlatform.Android
-                ? (ctx.definition.androidOutput == AndroidOutput.AAB ? "*.aab" : "*.apk")
-                : "*";
-            return Directory.EnumerateFiles(dir, pattern, SearchOption.AllDirectories).FirstOrDefault() ?? "";
-        }
+			AndroidSigning signing = definition.Signing;
+			string keystorePath = Path.IsPathRooted(signing.KeystoreFile)
+				? signing.KeystoreFile
+				: Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), signing.KeystoreFile));
+			string storePass = Environment.GetEnvironmentVariable(signing.KeystorePasswordEnvOrDefault);
+			string aliasPass = Environment.GetEnvironmentVariable(signing.KeyAliasPasswordEnvOrDefault);
+			if (string.IsNullOrEmpty(aliasPass)) aliasPass = storePass;
 
-        // ---- small utilities ---------------------------------------------------------------------------
+			if (string.IsNullOrEmpty(storePass))
+			{
+				Debug.LogWarning("[Build] Android signing configured but env '" + signing.KeystorePasswordEnvOrDefault +
+					"' is empty - the build may fall back to a debug keystore.");
+				return;
+			}
 
-        static string GetArg(string flag)
-        {
-            var args = Environment.GetCommandLineArgs();
-            for (var i = 0; i < args.Length - 1; i++)
-                if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase))
-                    return args[i + 1];
-            return null;
-        }
+			PlayerSettings.Android.useCustomKeystore = true;
+			PlayerSettings.Android.keystoreName = keystorePath;
+			PlayerSettings.Android.keystorePass = storePass;
+			PlayerSettings.Android.keyaliasName = signing.KeyAlias;
+			PlayerSettings.Android.keyaliasPass = aliasPass;
+			Debug.Log("[Build] Android signing applied (keystore=" + keystorePath + ", alias=" + signing.KeyAlias + ").");
+		}
 
-        static (string type, string method) SplitMethod(string fq)
-        {
-            var idx = fq.LastIndexOf('.');
-            if (idx <= 0) throw new Exception("buildMethod must be 'Type.Method' or 'Namespace.Type.Method': " + fq);
-            return (fq.Substring(0, idx), fq.Substring(idx + 1));
-        }
+		private static string ResolveOutputPath(BuildDefinition definition, BuildContext context)
+		{
+			string extension = definition.Platform == BuildPlatform.Android
+				? (definition.Output == AndroidOutput.AAB ? ".aab" : ".apk")
+				: ""; // iOS/standalone produce a folder; refined per-platform later.
 
-        static string[] SplitArgs(string args)
-            => string.IsNullOrEmpty(args) ? Array.Empty<string>()
-                                          : args.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+			string fileName = string.IsNullOrEmpty(definition.OutputFileName)
+				? SanitizeFileName(Application.productName) + "_" + context.VersionName + "_vc" + context.VersionCode
+				: definition.OutputFileName
+					.Replace("{project}", SanitizeFileName(Application.productName))
+					.Replace("{version}", context.VersionName)
+					.Replace("{code}", context.VersionCode.ToString());
 
-        static Type FindType(string typeName)
-        {
-            // Search loaded assemblies; try the bare name and a namespace-insensitive match.
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                var t = asm.GetType(typeName, false);
-                if (t != null) return t;
-            }
-            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                foreach (var t in SafeGetTypes(asm))
-                    if (t.Name == typeName || t.FullName == typeName) return t;
-            return null;
-        }
+			// Output under the checkout's Builds/Output/<Platform>/ staging (matches the server's artifact rules).
+			string directory = Path.Combine(Directory.GetCurrentDirectory(), "Builds", "Output", definition.Platform.ToServerToken());
+			Directory.CreateDirectory(directory);
+			return Path.Combine(directory, fileName + extension);
+		}
 
-        static Type[] SafeGetTypes(Assembly asm)
-        {
-            try { return asm.GetTypes(); }
-            catch (ReflectionTypeLoadException e) { return e.Types.Where(t => t != null).ToArray(); }
-        }
+		#endregion
 
-        static string SanitizeFileName(string s)
-        {
-            foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
-            return s.Replace(' ', '_');
-        }
-    }
+		#region Private Methods - Discovery
+
+		private static BuildDefinition FindDefinition(string definitionName)
+		{
+			foreach (string guid in AssetDatabase.FindAssets("t:" + nameof(BuildDefinition)))
+			{
+				string path = AssetDatabase.GUIDToAssetPath(guid);
+				BuildDefinition definition = AssetDatabase.LoadAssetAtPath<BuildDefinition>(path);
+				if (definition != null && definition.DefinitionName == definitionName) return definition;
+			}
+
+			return null;
+		}
+
+		private static ProjectConfig FindProjectConfig()
+		{
+			string[] guids = AssetDatabase.FindAssets("t:" + nameof(ProjectConfig));
+			if (guids.Length == 0) return null;
+			if (guids.Length > 1) Debug.LogWarning("[Build] multiple ProjectConfig assets found; using the first.");
+
+			return AssetDatabase.LoadAssetAtPath<ProjectConfig>(AssetDatabase.GUIDToAssetPath(guids[0]));
+		}
+
+		private static string FindArtifact(BuildContext context)
+		{
+			string directory = Path.Combine(Directory.GetCurrentDirectory(), "Builds");
+			if (!Directory.Exists(directory)) return "";
+
+			string pattern = context.Platform == BuildPlatform.Android
+				? (context.Definition.Output == AndroidOutput.AAB ? "*.aab" : "*.apk")
+				: "*";
+			return Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories).FirstOrDefault() ?? "";
+		}
+
+		#endregion
+
+		#region Private Methods - Utilities
+
+		private static string GetArg(string flag)
+		{
+			string[] args = Environment.GetCommandLineArgs();
+			for (int i = 0; i < args.Length - 1; i++)
+			{
+				if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+			}
+
+			return null;
+		}
+
+		private static (string Type, string Method) SplitMethod(string fullyQualified)
+		{
+			int index = fullyQualified.LastIndexOf('.');
+			if (index <= 0) throw new Exception("buildMethod must be 'Type.Method' or 'Namespace.Type.Method': " + fullyQualified);
+
+			return (fullyQualified.Substring(0, index), fullyQualified.Substring(index + 1));
+		}
+
+		private static string[] SplitArgs(string args)
+		{
+			return string.IsNullOrEmpty(args)
+				? Array.Empty<string>()
+				: args.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+		}
+
+		private static Type FindType(string typeName)
+		{
+			// Search loaded assemblies; try the bare name and a namespace-insensitive match.
+			foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+			{
+				Type type = assembly.GetType(typeName, false);
+				if (type != null) return type;
+			}
+
+			foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+			{
+				foreach (Type type in SafeGetTypes(assembly))
+				{
+					if (type.Name == typeName || type.FullName == typeName) return type;
+				}
+			}
+
+			return null;
+		}
+
+		private static Type[] SafeGetTypes(Assembly assembly)
+		{
+			try
+			{
+				return assembly.GetTypes();
+			}
+			catch (ReflectionTypeLoadException exception)
+			{
+				return exception.Types.Where(type => type != null).ToArray();
+			}
+		}
+
+		private static string SanitizeFileName(string value)
+		{
+			foreach (char invalid in Path.GetInvalidFileNameChars())
+			{
+				value = value.Replace(invalid, '_');
+			}
+
+			return value.Replace(' ', '_');
+		}
+
+		#endregion
+	}
 }
