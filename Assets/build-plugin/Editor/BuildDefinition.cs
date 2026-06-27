@@ -13,7 +13,7 @@ namespace Ateo.Build
 	/// variant - it passes this definition's name as the <c>unitybuild.definition</c> build parameter, and
 	/// <see cref="BuildRunner"/> loads and applies it. Wraps a Unity 6 Build Profile (preferred) and adds what
 	/// profiles don't cover: output naming/versioning, signing references, an ordered list of pre/post steps,
-	/// extra layered defines, and an optional named-method shim for a game's existing headless builder.
+	/// and an optional named-method shim for a game's existing headless builder.
 	/// </summary>
 	[CreateAssetMenu(menuName = "Build/Build Definition", fileName = "NewBuildDefinition", order = 0)]
 	public sealed class BuildDefinition : ScriptableObject
@@ -36,9 +36,6 @@ namespace Ateo.Build
 
 		[SerializeField, Tooltip("Legacy fallback when no Build Profile is set: explicit scene list. Empty = use EditorBuildSettings.")]
 		private SceneAsset[] _scenes;
-
-		[SerializeField, Tooltip("Extra scripting define symbols layered on top of the profile/project (e.g. CHEATS, TEST_CONFIG).")]
-		private string[] _extraScriptingDefines;
 
 		[SerializeField, Tooltip("Output file name without extension. Tokens: {project} {version} {code}. Empty = builder default.")]
 		private string _outputFileName;
@@ -73,7 +70,6 @@ namespace Ateo.Build
 		public BuildProfile Profile => _buildProfile;
 #endif
 		public IReadOnlyList<SceneAsset> Scenes => _scenes;
-		public IReadOnlyList<string> ExtraScriptingDefines => _extraScriptingDefines;
 		public string OutputFileName => _outputFileName;
 		public AndroidSigning Signing => _androidSigning;
 		public IReadOnlyList<BuildStep> PreSteps => _preSteps;

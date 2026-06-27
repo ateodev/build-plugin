@@ -1,11 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
-using UnityEditor.Build;
 #if UNITY_6000_0_OR_NEWER
 using UnityEditor.Build.Profile;
 #endif
@@ -302,40 +300,6 @@ namespace Ateo.Build
 				Debug.Log("[Build] switching active build target -> " + target + " (a recompile follows)");
 				EditorUserBuildSettings.SwitchActiveBuildTarget(definition.Platform.ToBuildTargetGroup(), target);
 			}
-
-			ApplyExtraDefines(definition, context);
-		}
-
-		private static void ApplyExtraDefines(BuildDefinition definition, BuildContext context)
-		{
-			IReadOnlyList<string> extraDefines = definition.ExtraScriptingDefines;
-			if (extraDefines == null || extraDefines.Count == 0) return;
-
-			if (context.IsBatchMode)
-			{
-				// Scripting defines only take effect after a recompile, which cannot happen mid-script in batch
-				// mode - so defines set here are NOT compiled into this build. Put build-specific defines in the
-				// Build Profile (activated via -activeBuildProfile) instead. Warn loudly rather than build wrong.
-				Debug.LogWarning("[Build] extraScriptingDefines are IGNORED in batch mode (no mid-script recompile) - " +
-					"put them in the Build Profile. Ignored: " + string.Join(";", extraDefines));
-				return;
-			}
-
-			NamedBuildTarget namedTarget = NamedBuildTarget.FromBuildTargetGroup(definition.Platform.ToBuildTargetGroup());
-			List<string> defines = PlayerSettings.GetScriptingDefineSymbols(namedTarget)
-				.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
-				.ToList();
-
-			foreach (string define in extraDefines)
-			{
-				if (!string.IsNullOrWhiteSpace(define) && !defines.Contains(define.Trim()))
-				{
-					defines.Add(define.Trim());
-				}
-			}
-
-			PlayerSettings.SetScriptingDefineSymbols(namedTarget, defines.ToArray());
-			Debug.Log("[Build] scripting defines (" + namedTarget.TargetName + "): " + string.Join(";", defines));
 		}
 
 		private static void ApplyAndroidSigning(BuildDefinition definition, BuildContext context)
@@ -367,9 +331,13 @@ namespace Ateo.Build
 
 		private static string ResolveOutputPath(BuildDefinition definition, BuildContext context)
 		{
-			string extension = definition.Platform == BuildPlatform.Android
-				? (definition.Output == AndroidOutput.AAB ? ".aab" : ".apk")
-				: ""; // iOS/standalone produce a folder; refined per-platform later.
+			string extension;
+			switch (definition.Platform)
+			{
+				case BuildPlatform.Android:           extension = definition.Output == AndroidOutput.AAB ? ".aab" : ".apk"; break;
+				case BuildPlatform.WindowsStandalone: extension = ".exe"; break;
+				default:                              extension = ""; break; // iOS/Mac/Linux/WebGL produce a folder; refined later.
+			}
 
 			string fileName = string.IsNullOrEmpty(definition.OutputFileName)
 				? SanitizeFileName(Application.productName) + "_" + context.VersionName + "_vc" + context.VersionCode
