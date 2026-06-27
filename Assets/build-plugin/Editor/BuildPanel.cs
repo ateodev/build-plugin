@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -26,6 +27,7 @@ namespace Ateo.Build
 
 		private List<BuildStatus> _builds = new List<BuildStatus>();
 		private readonly Dictionary<long, List<ArtifactFile>> _artifacts = new Dictionary<long, List<ArtifactFile>>();
+		private Dictionary<string, string> _executors = new Dictionary<string, string>();
 
 		#endregion
 
@@ -76,7 +78,8 @@ namespace Ateo.Build
 			{
 				_baseUrl = EditorGUILayout.TextField("Server URL", _baseUrl);
 				BuildServerSettings.Token = EditorGUILayout.PasswordField("Access Token", BuildServerSettings.Token);
-				BuildServerSettings.BuildTypeId = EditorGUILayout.TextField("Executor (buildTypeId)", BuildServerSettings.BuildTypeId);
+				BuildServerSettings.BuildTypeId = EditorGUILayout.TextField("Executor (history / fallback)", BuildServerSettings.BuildTypeId);
+				if (_executors.Count > 0) EditorGUILayout.LabelField(" ", "Auto-discovered: " + string.Join(", ", _executors.Keys), EditorStyles.miniLabel);
 
 				using (new EditorGUILayout.HorizontalScope())
 				{
@@ -190,13 +193,21 @@ namespace Ateo.Build
 		{
 			using (TeamCityClient client = NewClient())
 			{
-				List<BuildStatus> builds = await client.ListBuildsAsync(BuildServerSettings.BuildTypeId, null, 1);
-				_status = "Connected. Executor '" + BuildServerSettings.BuildTypeId + "' has " + builds.Count + " recent build(s).";
+				_executors = await client.DiscoverExecutorsAsync();
+				string map = _executors.Count == 0 ? "(none)" : string.Join(", ", _executors.Select(pair => pair.Key + "->" + pair.Value));
+				_status = "Connected. Discovered " + _executors.Count + " executor(s): " + map;
 			}
 		}
 
 		private async Task TriggerAsync(BuildDefinition definition)
 		{
+			string buildTypeId = ResolveExecutor(definition);
+			if (string.IsNullOrEmpty(buildTypeId))
+			{
+				_status = "No executor for platform '" + definition.Platform.ToServerToken() + "'. Test Connection to discover, or set a fallback.";
+				return;
+			}
+
 			Dictionary<string, string> properties = new Dictionary<string, string>
 			{
 				{ "unitybuild.game", _project != null ? _project.GameToken : "" },
@@ -209,10 +220,17 @@ namespace Ateo.Build
 
 			using (TeamCityClient client = NewClient())
 			{
-				long id = await client.TriggerBuildAsync(BuildServerSettings.BuildTypeId, properties);
-				_status = "Queued build " + id + " for '" + definition.DefinitionName + "'.";
+				long id = await client.TriggerBuildAsync(buildTypeId, properties);
+				_status = "Queued build " + id + " on '" + buildTypeId + "' for '" + definition.DefinitionName + "'.";
 				await RefreshBuildsAsync();
 			}
+		}
+
+		private string ResolveExecutor(BuildDefinition definition)
+		{
+			string token = definition.Platform.ToServerToken();
+			if (_executors.TryGetValue(token, out string id) && !string.IsNullOrEmpty(id)) return id;
+			return BuildServerSettings.BuildTypeId;
 		}
 
 		private async Task RefreshBuildsAsync()

@@ -86,6 +86,36 @@ namespace Ateo.Build
 			return result;
 		}
 
+		/// <summary>
+		/// Discover the platform-token -&gt; executor buildTypeId map by reading the <c>unitybuild.platform</c>
+		/// parameter every executor carries. Lets the panel pick the right config for a definition's platform
+		/// without the user hand-typing ids. Only configs the token can see are returned.
+		/// </summary>
+		public async Task<Dictionary<string, string>> DiscoverExecutorsAsync()
+		{
+			string json = await GetAsync("/app/rest/buildTypes?fields=buildType(id,parameters(property(name,value)))");
+			BuildTypesDto list = JsonUtility.FromJson<BuildTypesDto>(json);
+
+			Dictionary<string, string> map = new Dictionary<string, string>();
+			if (list != null && list.buildType != null)
+			{
+				foreach (BuildTypeDto buildType in list.buildType)
+				{
+					if (buildType.parameters == null || buildType.parameters.property == null) continue;
+
+					foreach (PropertyDto property in buildType.parameters.property)
+					{
+						if (property.name == "unitybuild.platform" && !string.IsNullOrEmpty(property.value))
+						{
+							map[property.value] = buildType.id;
+						}
+					}
+				}
+			}
+
+			return map;
+		}
+
 		/// <summary>Top-level artifact file names of a build.</summary>
 		public async Task<List<ArtifactFile>> ListArtifactsAsync(long id)
 		{
@@ -176,6 +206,9 @@ namespace Ateo.Build
 		[Serializable] private sealed class BuildListDto { public BuildDto[] build; }
 		[Serializable] private sealed class ArtifactFileDto { public string name; public long size; }
 		[Serializable] private sealed class ArtifactListDto { public ArtifactFileDto[] file; }
+		[Serializable] private sealed class BuildTypeDto { public string id; public ParamsDto parameters; }
+		[Serializable] private sealed class ParamsDto { public PropertyDto[] property; }
+		[Serializable] private sealed class BuildTypesDto { public BuildTypeDto[] buildType; }
 
 		#endregion
 	}
