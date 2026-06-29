@@ -1,33 +1,63 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Threading.Tasks;
+using Sirenix.OdinInspector;
+using Sirenix.OdinInspector.Editor;
+using Sirenix.Utilities.Editor;
 using UnityEditor;
 using UnityEngine;
 
 namespace Ateo.Build
 {
 	/// <summary>
-	/// The in-Editor control plane (L3): lists the project's build definitions, builds them locally through
-	/// the same <see cref="BuildRunner"/> code path as CI, or triggers them on the build server via
-	/// <see cref="TeamCityClient"/>, and shows recent server builds with artifact download. Thin REST client
-	/// over the user's own token - no admin access, no server-side coupling.
+	/// The v2 control plane (§12). An <see cref="OdinMenuEditorWindow"/> whose left menu tree IS the sidebar:
+	/// the project's <see cref="BuildDefinition"/> assets grouped by target, with a pinned <c>Activity</c> view
+	/// (live count badge). The top menu bar adds a definition (wizard placeholder, P2.D) and swaps the right pane
+	/// to the project-level Settings / Secrets views. The right pane is master-detail: a definition shows
+	/// Build / Configure tabs (<see cref="DefinitionView"/>); Settings / Secrets / Activity are single views.
+	/// Refresh is on-select + a manual reload + a focused periodic poll while the open view has an active build.
 	/// </summary>
-	public sealed class BuildPanel : EditorWindow
+	public sealed class BuildPanel : OdinMenuEditorWindow
 	{
 		#region Fields
+
+		private readonly Dictionary<BuildDefinition, DefinitionView> _definitionViews = new Dictionary<BuildDefinition, DefinitionView>();
+		private SettingsView _settingsView;
+		private SecretsView _secretsView;
+		private ActivityView _activityView;
 
 		private BuildDefinition[] _definitions = Array.Empty<BuildDefinition>();
 		private ProjectConfig _project;
 		private string _baseUrl = "";
-		private string _status = "";
-		private Vector2 _scroll;
-		private bool _busy;
-
-		private List<BuildStatus> _builds = new List<BuildStatus>();
-		private readonly Dictionary<long, List<ArtifactFile>> _artifacts = new Dictionary<long, List<ArtifactFile>>();
 		private Dictionary<string, string> _executors = new Dictionary<string, string>();
+
+		private object _paneOverride;
+		private object _pendingSelect;
+		private string _status = "";
+		private int _activityCount;
+
+		private bool _pollingHooked;
+		private double _lastPoll;
+
+		#endregion
+
+		#region Properties
+
+		/// <summary>The project's resolved <see cref="ProjectConfig"/> (null until found / created).</summary>
+		internal ProjectConfig Project => _project;
+
+		/// <summary>Base URL of the TeamCity server the panel talks to.</summary>
+		internal string BaseUrl => _baseUrl;
+
+		/// <summary>The user's permission-scoped access token (machine-local).</summary>
+		internal string Token => BuildServerSettings.Token;
+
+		/// <summary>The discovered platform-token -&gt; executor map (populated by <see cref="DiscoverExecutorsAsync"/>).</summary>
+		internal IReadOnlyDictionary<string, string> Executors => _executors;
+
+		/// <summary>The Unity project root (parent of Assets) - the on-disk Builds/ layout lives here.</summary>
+		internal static string ProjectRoot => Directory.GetParent(Application.dataPath).FullName;
 
 		#endregion
 
@@ -36,264 +66,99 @@ namespace Ateo.Build
 		[MenuItem("Window/Build Panel")]
 		private static void Open()
 		{
-			GetWindow<BuildPanel>("Build Panel").Show();
+			BuildPanel window = GetWindow<BuildPanel>("Build Panel");
+			window.MenuWidth = 240;
+			window.Show();
 		}
 
 		#endregion
 
-		#region Unity
+		#region OdinMenuEditorWindow
 
-		private void OnEnable()
+		protected override OdinMenuTree BuildMenuTree()
 		{
 			Reload();
-		}
 
-		private void OnGUI()
-		{
-			_scroll = EditorGUILayout.BeginScrollView(_scroll);
-
-			DrawServer();
-			EditorGUILayout.Space();
-			DrawDefinitions();
-			EditorGUILayout.Space();
-			DrawBuilds();
-
-			if (!string.IsNullOrEmpty(_status))
-			{
-				EditorGUILayout.Space();
-				EditorGUILayout.HelpBox(_status, MessageType.None);
-			}
-
-			EditorGUILayout.EndScrollView();
-		}
-
-		#endregion
-
-		#region GUI Sections
-
-		private void DrawServer()
-		{
-			EditorGUILayout.LabelField("Build Server", EditorStyles.boldLabel);
-			using (new EditorGUI.DisabledScope(_busy))
-			{
-				_baseUrl = EditorGUILayout.TextField("Server URL", _baseUrl);
-				BuildServerSettings.Token = EditorGUILayout.PasswordField("Access Token", BuildServerSettings.Token);
-				BuildServerSettings.BuildTypeId = EditorGUILayout.TextField("Executor (history / fallback)", BuildServerSettings.BuildTypeId);
-				if (_executors.Count > 0) EditorGUILayout.LabelField(" ", "Auto-discovered: " + string.Join(", ", _executors.Keys), EditorStyles.miniLabel);
-
-				using (new EditorGUILayout.HorizontalScope())
-				{
-					if (GUILayout.Button("Test Connection")) RunAsync(TestConnectionAsync());
-					if (GUILayout.Button("Refresh Builds")) RunAsync(RefreshBuildsAsync());
-					if (GUILayout.Button("Reload Definitions")) Reload();
-				}
-			}
-		}
-
-		private void DrawDefinitions()
-		{
-			EditorGUILayout.LabelField("Definitions (" + _definitions.Length + ")", EditorStyles.boldLabel);
-			if (_definitions.Length == 0)
-			{
-				EditorGUILayout.HelpBox("No BuildDefinition assets found. Create one via Create > Build > Build Definition.", MessageType.Info);
-				return;
-			}
+			OdinMenuTree tree = new OdinMenuTree(false);
+			tree.Config.DrawSearchToolbar = true;
 
 			foreach (BuildDefinition definition in _definitions)
 			{
-				using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+				if (definition == null) continue;
+
+				DefinitionView view = GetOrCreateView(definition);
+				string path = GroupLabel(definition.Platform) + "/" + definition.DefinitionName;
+				tree.Add(path, view);
+			}
+
+			if (_activityView == null) _activityView = new ActivityView();
+			string activityName = _activityCount > 0 ? "Activity  (" + _activityCount + ")" : "Activity";
+			tree.Add(activityName, _activityView);
+
+			tree.Selection.SelectionChanged += OnSelectionChanged;
+			return tree;
+		}
+
+		protected override IEnumerable<object> GetTargets()
+		{
+			if (_paneOverride != null) return new[] { _paneOverride };
+			return base.GetTargets();
+		}
+
+		protected override void OnBeginDrawEditors()
+		{
+			SirenixEditorGUI.BeginHorizontalToolbar();
+			{
+				if (SirenixEditorGUI.ToolbarButton(new GUIContent("  + Add Build Definition")))
 				{
-					EditorGUILayout.LabelField(definition.DefinitionName + "  (" + definition.Platform + ")");
-					using (new EditorGUI.DisabledScope(_busy))
-					{
-						if (GUILayout.Button("Build Local", GUILayout.Width(90))) BuildLocal(definition);
-						if (GUILayout.Button("Build on Server", GUILayout.Width(120))) RunAsync(TriggerAsync(definition));
-					}
+					Debug.Log("[Build Panel] Add Build Definition -> wizard (P2.D) not yet implemented.");
+					_status = "The create-definition wizard (P2.D) is not built yet - create a BuildDefinition asset manually for now.";
 				}
+
+				GUILayout.FlexibleSpace();
+
+				if (SirenixEditorGUI.ToolbarButton(new GUIContent("Reload"))) ForceRebuild();
+				if (SirenixEditorGUI.ToolbarButton(new GUIContent("⚙ Settings"))) ShowOverride(_settingsView ??= new SettingsView());
+				if (SirenixEditorGUI.ToolbarButton(new GUIContent("\U0001F511 Secrets"))) ShowOverride(_secretsView ??= new SecretsView());
+			}
+			SirenixEditorGUI.EndHorizontalToolbar();
+
+			if (!string.IsNullOrEmpty(_status))
+			{
+				SirenixEditorGUI.MessageBox(_status, MessageType.Info);
 			}
 		}
 
-		private void DrawBuilds()
+		protected override void OnImGUI()
 		{
-			EditorGUILayout.LabelField("Recent Server Builds", EditorStyles.boldLabel);
-			foreach (BuildStatus build in _builds)
-			{
-				using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
-				{
-					using (new EditorGUILayout.HorizontalScope())
-					{
-						EditorGUILayout.LabelField("#" + build.Number + "  " + DescribeState(build));
-						if (!string.IsNullOrEmpty(build.WebUrl) && GUILayout.Button("Open", GUILayout.Width(60))) Application.OpenURL(build.WebUrl);
-						using (new EditorGUI.DisabledScope(_busy))
-						{
-							if (build.IsFinished && GUILayout.Button("Artifacts", GUILayout.Width(80))) RunAsync(LoadArtifactsAsync(build.Id));
-						}
-					}
-
-					DrawArtifacts(build.Id);
-				}
-			}
+			EnsurePolling();
+			base.OnImGUI();
 		}
 
-		private void DrawArtifacts(long buildId)
+		protected override void OnDestroy()
 		{
-			if (!_artifacts.TryGetValue(buildId, out List<ArtifactFile> files)) return;
-
-			foreach (ArtifactFile file in files)
+			if (_pollingHooked)
 			{
-				using (new EditorGUILayout.HorizontalScope())
-				{
-					EditorGUILayout.LabelField("   " + file.Name + "  (" + (file.Size / 1048576.0).ToString("F1") + " MiB)");
-					using (new EditorGUI.DisabledScope(_busy))
-					{
-						if (GUILayout.Button("Download", GUILayout.Width(90))) RunAsync(DownloadAsync(buildId, file.Name));
-					}
-				}
+				EditorApplication.update -= Poll;
+				_pollingHooked = false;
 			}
+
+			base.OnDestroy();
 		}
 
 		#endregion
 
-		#region Actions
+		#region Internal API (used by the views)
 
-		private void Reload()
+		/// <summary>A fresh REST client bound to the current server URL + token. Caller disposes.</summary>
+		internal TeamCityClient NewClient()
 		{
-			List<BuildDefinition> definitions = new List<BuildDefinition>();
-			foreach (string guid in AssetDatabase.FindAssets("t:" + nameof(BuildDefinition)))
-			{
-				BuildDefinition definition = AssetDatabase.LoadAssetAtPath<BuildDefinition>(AssetDatabase.GUIDToAssetPath(guid));
-				if (definition != null) definitions.Add(definition);
-			}
-
-			_definitions = definitions.ToArray();
-
-			string[] projectGuids = AssetDatabase.FindAssets("t:" + nameof(ProjectConfig));
-			_project = projectGuids.Length > 0
-				? AssetDatabase.LoadAssetAtPath<ProjectConfig>(AssetDatabase.GUIDToAssetPath(projectGuids[0]))
-				: null;
-
-			if (string.IsNullOrEmpty(_baseUrl)) _baseUrl = _project != null ? _project.ServerBaseUrl : "https://build.ateonet.work";
+			return new TeamCityClient(_baseUrl, Token);
 		}
 
-		private void BuildLocal(BuildDefinition definition)
+		/// <summary>Run an editor-async task, surfacing any error into the panel status and repainting on completion.</summary>
+		internal async void RunAsync(Task task, Action onDone = null)
 		{
-			try
-			{
-				BuildResult result = BuildRunner.RunDefinition(definition);
-				_status = (result.Success ? "Local build OK: " : "Local build FAILED: ") +
-					(result.Success ? result.ArtifactPath : result.Error);
-			}
-			catch (Exception exception)
-			{
-				_status = "Local build threw: " + exception.Message;
-			}
-		}
-
-		private async Task TestConnectionAsync()
-		{
-			using (TeamCityClient client = NewClient())
-			{
-				_executors = await client.DiscoverExecutorsAsync();
-				string map = _executors.Count == 0 ? "(none)" : string.Join(", ", _executors.Select(pair => pair.Key + "->" + pair.Value));
-				_status = "Connected. Discovered " + _executors.Count + " executor(s): " + map;
-			}
-		}
-
-		private async Task TriggerAsync(BuildDefinition definition)
-		{
-			string buildTypeId = ResolveExecutor(definition);
-			if (string.IsNullOrEmpty(buildTypeId))
-			{
-				_status = "No executor for platform '" + definition.Platform.ToServerToken() + "'. Test Connection to discover, or set a fallback.";
-				return;
-			}
-
-			Dictionary<string, string> properties = new Dictionary<string, string>
-			{
-				{ "unitybuild.game", _project != null ? _project.GameToken : "" },
-				{ "unitybuild.definition", definition.DefinitionName },
-				{ "unitybuild.platform", definition.Platform.ToServerToken() }
-			};
-#if UNITY_6000_0_OR_NEWER
-			if (definition.Profile != null) properties["unitybuild.buildProfile"] = AssetDatabase.GetAssetPath(definition.Profile);
-#endif
-
-			using (TeamCityClient client = NewClient())
-			{
-				long id = await client.TriggerBuildAsync(buildTypeId, properties);
-				_status = "Queued build " + id + " on '" + buildTypeId + "' for '" + definition.DefinitionName + "'.";
-				await RefreshBuildsAsync();
-			}
-		}
-
-		private string ResolveExecutor(BuildDefinition definition)
-		{
-			string token = definition.Platform.ToServerToken();
-			if (_executors.TryGetValue(token, out string id) && !string.IsNullOrEmpty(id)) return id;
-			return BuildServerSettings.BuildTypeId;
-		}
-
-		private async Task RefreshBuildsAsync()
-		{
-			// Query the manual fallback (if set) plus every auto-discovered executor; never an empty id.
-			List<string> targets = new List<string>();
-			if (!string.IsNullOrEmpty(BuildServerSettings.BuildTypeId)) targets.Add(BuildServerSettings.BuildTypeId);
-			foreach (string id in _executors.Values)
-			{
-				if (!string.IsNullOrEmpty(id) && !targets.Contains(id)) targets.Add(id);
-			}
-
-			if (targets.Count == 0)
-			{
-				_status = "No executor to query. Run Test Connection to discover executors, or set one.";
-				return;
-			}
-
-			using (TeamCityClient client = NewClient())
-			{
-				List<BuildStatus> all = new List<BuildStatus>();
-				foreach (string id in targets)
-				{
-					all.AddRange(await client.ListBuildsAsync(id, null, 10));
-				}
-
-				_builds = all;
-				_status = "Loaded " + _builds.Count + " build(s) from " + targets.Count + " executor(s).";
-			}
-		}
-
-		private async Task LoadArtifactsAsync(long buildId)
-		{
-			using (TeamCityClient client = NewClient())
-			{
-				_artifacts[buildId] = await client.ListArtifactsAsync(buildId);
-				_status = _artifacts[buildId].Count + " artifact(s) on build " + buildId + ".";
-			}
-		}
-
-		private async Task DownloadAsync(long buildId, string artifactName)
-		{
-			string destination = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Builds", "Downloaded", artifactName);
-			using (TeamCityClient client = NewClient())
-			{
-				await client.DownloadArtifactAsync(buildId, artifactName, destination);
-				_status = "Downloaded -> " + destination;
-			}
-		}
-
-		#endregion
-
-		#region Helpers
-
-		private TeamCityClient NewClient()
-		{
-			return new TeamCityClient(_baseUrl, BuildServerSettings.Token);
-		}
-
-		private async void RunAsync(Task task)
-		{
-			_busy = true;
-			Repaint();
 			try
 			{
 				await task;
@@ -304,17 +169,211 @@ namespace Ateo.Build
 			}
 			finally
 			{
-				_busy = false;
+				onDone?.Invoke();
 				Repaint();
 			}
 		}
 
-		private static string DescribeState(BuildStatus build)
+		/// <summary>Set the panel status line (shown under the toolbar).</summary>
+		internal void SetStatus(string status)
 		{
-			if (build.IsRunning) return "running " + build.PercentageComplete + "%  " + build.StatusText;
-			if (build.IsQueued) return "queued";
-			return build.Status + "  " + build.StatusText;
+			_status = status;
+			Repaint();
 		}
+
+		/// <summary>
+		/// The executor config id for a definition's platform: the discovered map first, the manual fallback second.
+		/// Empty when neither is known (the caller turns that into an actionable message).
+		/// </summary>
+		internal string ResolveExecutor(BuildDefinition definition)
+		{
+			string token = definition.Platform.ToServerToken();
+			if (_executors != null && _executors.TryGetValue(token, out string id) && !string.IsNullOrEmpty(id)) return id;
+			return BuildServerSettings.BuildTypeId;
+		}
+
+		/// <summary>Discover the platform -&gt; executor map (called by views before triggering / listing server builds).</summary>
+		internal async Task DiscoverExecutorsAsync()
+		{
+			if (string.IsNullOrEmpty(Token)) return;
+
+			using (TeamCityClient client = NewClient())
+			{
+				_executors = await client.DiscoverExecutorsAsync();
+			}
+		}
+
+		/// <summary>Update the Activity sidebar badge; rebuilds the tree (preserving selection) when the count changes.</summary>
+		internal void SetActivityCount(int count)
+		{
+			if (count == _activityCount) return;
+
+			_activityCount = count;
+			ForceRebuild();
+		}
+
+		/// <summary>Jump to a definition's Build tab (Activity's "open in project" action).</summary>
+		internal void SelectDefinition(BuildDefinition definition)
+		{
+			if (definition == null || !_definitionViews.TryGetValue(definition, out DefinitionView view)) return;
+
+			_paneOverride = null;
+			TrySelectMenuItemWithObject(view);
+		}
+
+		/// <summary>Jump to a definition by its name (Activity's jump action for this project's game).</summary>
+		internal void SelectDefinitionByName(string definitionName)
+		{
+			if (string.IsNullOrEmpty(definitionName)) return;
+
+			foreach (BuildDefinition definition in _definitions)
+			{
+				if (definition != null && definition.DefinitionName == definitionName)
+				{
+					SelectDefinition(definition);
+					return;
+				}
+			}
+		}
+
+		#endregion
+
+		#region Private Methods
+
+		private void OnSelectionChanged(SelectionChangedType type)
+		{
+			if (type != SelectionChangedType.ItemAdded) return;
+
+			_paneOverride = null;
+			_status = "";
+
+			object selected = MenuTree?.Selection?.SelectedValue;
+			if (selected is IPanelView view) view.Refresh(this);
+		}
+
+		private void ShowOverride(IPanelView view)
+		{
+			_paneOverride = view;
+			_status = "";
+			view.Refresh(this);
+			Repaint();
+		}
+
+		private void ForceRebuild()
+		{
+			_pendingSelect = _paneOverride ?? MenuTree?.Selection?.SelectedValue;
+			ForceMenuTreeRebuild();
+			if (_pendingSelect != null && _paneOverride == null) TrySelectMenuItemWithObject(_pendingSelect);
+			Repaint();
+		}
+
+		private DefinitionView GetOrCreateView(BuildDefinition definition)
+		{
+			if (!_definitionViews.TryGetValue(definition, out DefinitionView view))
+			{
+				view = new DefinitionView(definition, this);
+				_definitionViews[definition] = view;
+			}
+
+			return view;
+		}
+
+		private void Reload()
+		{
+			List<BuildDefinition> definitions = new List<BuildDefinition>();
+			foreach (string guid in AssetDatabase.FindAssets("t:" + nameof(BuildDefinition)))
+			{
+				BuildDefinition definition = AssetDatabase.LoadAssetAtPath<BuildDefinition>(AssetDatabase.GUIDToAssetPath(guid));
+				if (definition != null) definitions.Add(definition);
+			}
+
+			definitions.Sort((a, b) =>
+			{
+				int byPlatform = string.CompareOrdinal(GroupLabel(a.Platform), GroupLabel(b.Platform));
+				return byPlatform != 0 ? byPlatform : string.CompareOrdinal(a.DefinitionName, b.DefinitionName);
+			});
+			_definitions = definitions.ToArray();
+
+			string[] projectGuids = AssetDatabase.FindAssets("t:" + nameof(ProjectConfig));
+			_project = projectGuids.Length > 0
+				? AssetDatabase.LoadAssetAtPath<ProjectConfig>(AssetDatabase.GUIDToAssetPath(projectGuids[0]))
+				: null;
+
+			if (string.IsNullOrEmpty(_baseUrl))
+			{
+				_baseUrl = _project != null ? _project.ServerBaseUrl : "https://build.ateonet.work";
+			}
+
+			// Drop cached views whose asset was deleted, so the dictionary doesn't leak.
+			List<BuildDefinition> stale = new List<BuildDefinition>();
+			foreach (KeyValuePair<BuildDefinition, DefinitionView> pair in _definitionViews)
+			{
+				if (pair.Key == null || Array.IndexOf(_definitions, pair.Key) < 0) stale.Add(pair.Key);
+			}
+
+			foreach (BuildDefinition key in stale) _definitionViews.Remove(key);
+		}
+
+		private void EnsurePolling()
+		{
+			if (_pollingHooked) return;
+
+			_pollingHooked = true;
+			EditorApplication.update += Poll;
+		}
+
+		private void Poll()
+		{
+			if (!hasFocus) return; // pause when unfocused (§12.4)
+			if (EditorApplication.timeSinceStartup - _lastPoll < 3.0) return;
+
+			_lastPoll = EditorApplication.timeSinceStartup;
+
+			object current = _paneOverride ?? MenuTree?.Selection?.SelectedValue;
+			if (current is IPanelView view && view.HasActiveBuild) view.Refresh(this);
+		}
+
+		private static string GroupLabel(BuildPlatform platform)
+		{
+			switch (platform)
+			{
+				case BuildPlatform.Android:           return "Android";
+				case BuildPlatform.iOS:               return "iOS";
+				case BuildPlatform.WindowsStandalone: return "Windows";
+				case BuildPlatform.MacStandalone:     return "macOS";
+				case BuildPlatform.LinuxStandalone:   return "Linux";
+				case BuildPlatform.LinuxServer:       return "Linux Server";
+				case BuildPlatform.WebGL:             return "WebGL";
+				default:                              return platform.ToString();
+			}
+		}
+
+		#endregion
+	}
+
+	/// <summary>A right-pane view that can refresh from the server and report whether it is watching a live build.</summary>
+	internal interface IPanelView
+	{
+		/// <summary>Re-load this view's state (called on selection, manual reload, and the focused poll).</summary>
+		void Refresh(BuildPanel owner);
+
+		/// <summary>True while this view is showing a queued/running build - drives the focused periodic poll.</summary>
+		bool HasActiveBuild { get; }
+	}
+
+	/// <summary>One row in a definition's unified Builds list - a server build, an on-disk build, or both.</summary>
+	internal sealed class BuildRow
+	{
+		#region Fields
+
+		public string Title;
+		public string Detail;
+		public bool OnServer;
+		public bool LocalPresent;
+		public string LocalPath;
+		public long ServerId;
+		public string WebUrl;
+		public bool Live;
 
 		#endregion
 	}

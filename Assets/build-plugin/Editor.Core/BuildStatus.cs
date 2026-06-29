@@ -13,6 +13,13 @@ namespace Ateo.Build
 		public int PercentageComplete;
 		public string WebUrl;
 
+		// Populated for the Activity / in-flight views from the build's unitybuild.* properties + REST attributes.
+		public string Game;               // unitybuild.game property (null when not recorded)
+		public string Definition;         // unitybuild.definition property (null when not recorded)
+		public string BuildTypeId;        // owning executor config id
+		public string Agent;              // running agent name (null while queued)
+		public int QueuePosition;         // 1-based position while queued (0 when not applicable)
+
 		#endregion
 
 		#region Properties

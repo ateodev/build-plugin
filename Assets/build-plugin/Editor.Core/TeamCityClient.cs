@@ -87,6 +87,77 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
+		/// The team's in-flight builds (Activity view, §12.4): the queue (<c>/buildQueue</c>, with position) merged
+		/// with everything currently running (<c>state:running</c>). Token-scoped by the server, so cross-team builds
+		/// are invisible. Each row carries game/definition (from the recorded <c>unitybuild.*</c> properties), the
+		/// owning executor, status, progress and - while running - the agent. Queued first (by position), then running.
+		/// </summary>
+		public async Task<List<BuildStatus>> ListInFlightAsync()
+		{
+			List<BuildStatus> result = new List<BuildStatus>();
+
+			string queueJson = await GetAsync("/app/rest/buildQueue?fields=" + Uri.EscapeDataString(
+				"build(id,number,state,statusText,buildTypeId,properties(property(name,value)))"));
+			BuildListDto queue = JsonUtility.FromJson<BuildListDto>(queueJson);
+			if (queue != null && queue.build != null)
+			{
+				int position = 1;
+				foreach (BuildDto dto in queue.build)
+				{
+					BuildStatus status = ToStatus(dto);
+					status.QueuePosition = position++;
+					result.Add(status);
+				}
+			}
+
+			string runningLocator = "state:running,defaultFilter:false,count:50";
+			string runningJson = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(runningLocator) +
+				"&fields=" + Uri.EscapeDataString(
+					"build(id,number,state,status,statusText,percentageComplete,webUrl,buildTypeId," +
+					"agent(name),properties(property(name,value)))"));
+			BuildListDto running = JsonUtility.FromJson<BuildListDto>(runningJson);
+			if (running != null && running.build != null)
+			{
+				foreach (BuildDto dto in running.build) result.Add(ToStatus(dto));
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// Cancel an in-flight build (§12.4). A queued build is removed from the queue
+		/// (<c>DELETE /buildQueue/id:N</c>); a running build is stopped via a build-cancel request
+		/// (<c>POST /builds/id:N</c>, not re-added to the queue).
+		/// </summary>
+		public async Task CancelAsync(long id, bool queued)
+		{
+			if (queued)
+			{
+				using (HttpResponseMessage response = await _http.DeleteAsync(_baseUrl + "/app/rest/buildQueue/id:" + id))
+				{
+					if (!response.IsSuccessStatusCode)
+					{
+						string json = await response.Content.ReadAsStringAsync();
+						throw new Exception("Cancel (queued) failed (" + (int)response.StatusCode + "): " + Trim(json));
+					}
+				}
+
+				return;
+			}
+
+			const string body = "{\"comment\":\"Cancelled from Build Panel\",\"readdIntoQueue\":false}";
+			using (StringContent content = new StringContent(body, Encoding.UTF8, "application/json"))
+			using (HttpResponseMessage response = await _http.PostAsync(_baseUrl + "/app/rest/builds/id:" + id, content))
+			{
+				if (!response.IsSuccessStatusCode)
+				{
+					string json = await response.Content.ReadAsStringAsync();
+					throw new Exception("Cancel (running) failed (" + (int)response.StatusCode + "): " + Trim(json));
+				}
+			}
+		}
+
+		/// <summary>
 		/// Discover the platform-token -&gt; executor buildTypeId map by reading the <c>unitybuild.platform</c>
 		/// parameter every executor carries. Lets the panel pick the right config for a definition's platform
 		/// without the user hand-typing ids. Only configs the token can see are returned.
@@ -162,7 +233,7 @@ namespace Ateo.Build
 
 		private static BuildStatus ToStatus(BuildDto dto)
 		{
-			return new BuildStatus
+			BuildStatus status = new BuildStatus
 			{
 				Id = dto.id,
 				Number = dto.number,
@@ -170,8 +241,26 @@ namespace Ateo.Build
 				Status = dto.status,
 				StatusText = dto.statusText,
 				PercentageComplete = dto.percentageComplete,
-				WebUrl = dto.webUrl
+				WebUrl = dto.webUrl,
+				BuildTypeId = dto.buildTypeId,
+				Agent = dto.agent != null ? dto.agent.name : null,
+				Game = FindProperty(dto, "unitybuild.game"),
+				Definition = FindProperty(dto, "unitybuild.definition")
 			};
+
+			return status;
+		}
+
+		private static string FindProperty(BuildDto dto, string name)
+		{
+			if (dto == null || dto.properties == null || dto.properties.property == null) return null;
+
+			foreach (PropertyDto property in dto.properties.property)
+			{
+				if (property != null && property.name == name) return property.value;
+			}
+
+			return null;
 		}
 
 		private static PropertiesDto ToProperties(IReadOnlyDictionary<string, string> properties)
@@ -202,7 +291,8 @@ namespace Ateo.Build
 		[Serializable] private sealed class BuildTypeRef { public string id; }
 		[Serializable] private sealed class PropertiesDto { public PropertyDto[] property; }
 		[Serializable] private sealed class PropertyDto { public string name; public string value; }
-		[Serializable] private sealed class BuildDto { public long id; public string number; public string state; public string status; public string statusText; public int percentageComplete; public string webUrl; }
+		[Serializable] private sealed class BuildDto { public long id; public string number; public string state; public string status; public string statusText; public int percentageComplete; public string webUrl; public string buildTypeId; public AgentDto agent; public PropertiesDto properties; }
+		[Serializable] private sealed class AgentDto { public string name; }
 		[Serializable] private sealed class BuildListDto { public BuildDto[] build; }
 		[Serializable] private sealed class ArtifactFileDto { public string name; public long size; }
 		[Serializable] private sealed class ArtifactListDto { public ArtifactFileDto[] file; }

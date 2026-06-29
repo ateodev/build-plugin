@@ -10,10 +10,18 @@
   ],
   "excludePlatforms": [],
   "allowUnsafeCode": false,
-  "overrideReferences": false,
-  "precompiledReferences": [],
+  "overrideReferences": true,
+  "precompiledReferences": [
+    "Sirenix.OdinInspector.Editor.dll",
+    "Sirenix.OdinInspector.Attributes.dll",
+    "Sirenix.Serialization.dll",
+    "Sirenix.Utilities.dll",
+    "Sirenix.Utilities.Editor.dll"
+  ],
   "autoReferenced": true,
-  "defineConstraints": [],
+  "defineConstraints": [
+    "ODIN_INSPECTOR"
+  ],
   "versionDefines": [],
   "noEngineReferences": false
 }
