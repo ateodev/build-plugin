@@ -111,8 +111,7 @@ namespace Ateo.Build
 			{
 				if (SirenixEditorGUI.ToolbarButton(new GUIContent("  + Add Build Definition")))
 				{
-					Debug.Log("[Build Panel] Add Build Definition -> wizard (P2.D) not yet implemented.");
-					_status = "The create-definition wizard (P2.D) is not built yet - create a BuildDefinition asset manually for now.";
+					CreateDefinitionWizard.Open(this);
 				}
 
 				GUILayout.FlexibleSpace();
@@ -126,6 +125,15 @@ namespace Ateo.Build
 			if (!string.IsNullOrEmpty(_status))
 			{
 				SirenixEditorGUI.MessageBox(_status, MessageType.Info);
+			}
+
+			if (_project == null)
+			{
+				SirenixEditorGUI.MessageBox(
+					"No ProjectConfig found - this project hasn't been onboarded yet. Run the project-setup wizard to create one.",
+					MessageType.Warning);
+
+				if (GUILayout.Button("Open Project Setup Wizard")) ProjectSetupWizard.Open(this);
 			}
 		}
 
@@ -219,6 +227,22 @@ namespace Ateo.Build
 
 			_paneOverride = null;
 			TrySelectMenuItemWithObject(view);
+		}
+
+		/// <summary>Rebuild the sidebar (re-scanning assets) and select the newly-created definition - the create-definition wizard's completion hook.</summary>
+		internal void RefreshAndSelect(string definitionName)
+		{
+			_paneOverride = null;
+			ForceMenuTreeRebuild();
+			if (!string.IsNullOrEmpty(definitionName)) SelectDefinitionByName(definitionName);
+			Repaint();
+		}
+
+		/// <summary>Rebuild the sidebar (re-scanning for the new ProjectConfig) and show Settings - the project-setup wizard's completion hook.</summary>
+		internal void RefreshProject()
+		{
+			ForceMenuTreeRebuild();
+			ShowOverride(_settingsView ??= new SettingsView());
 		}
 
 		/// <summary>Jump to a definition by its name (Activity's jump action for this project's game).</summary>
