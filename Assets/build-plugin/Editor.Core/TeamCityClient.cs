@@ -160,8 +160,11 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// Discover the platform-token -&gt; executor buildTypeId map by reading the <c>unitybuild.platform</c>
-		/// parameter every executor carries. Lets the panel pick the right config for a definition's platform
-		/// without the user hand-typing ids. Only configs the token can see are returned.
+		/// parameter every executor carries. A capability-profile executor advertises a <b>comma-separated set</b>
+		/// of the platforms it can build (e.g. <c>Android,WebGL,LinuxStandalone,WinStandalone</c>), so each token is
+		/// mapped individually - a single-token lookup must still resolve a multi-platform executor. Lets the panel
+		/// pick the right config for a definition's platform without the user hand-typing ids. Only configs the
+		/// token can see are returned.
 		/// </summary>
 		public async Task<Dictionary<string, string>> DiscoverExecutorsAsync()
 		{
@@ -177,9 +180,12 @@ namespace Ateo.Build
 
 					foreach (PropertyDto property in buildType.parameters.property)
 					{
-						if (property.name == "unitybuild.platform" && !string.IsNullOrEmpty(property.value))
+						if (property.name != "unitybuild.platform" || string.IsNullOrEmpty(property.value)) continue;
+
+						foreach (string token in property.value.Split(','))
 						{
-							map[property.value] = buildType.id;
+							string trimmed = token.Trim();
+							if (!string.IsNullOrEmpty(trimmed)) map[trimmed] = buildType.id;
 						}
 					}
 				}
