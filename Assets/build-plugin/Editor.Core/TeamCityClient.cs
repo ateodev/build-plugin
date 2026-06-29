@@ -187,16 +187,24 @@ namespace Ateo.Build
 			return map;
 		}
 
-		/// <summary>Top-level artifact file names of a build.</summary>
+		/// <summary>
+		/// Top-level artifact <b>files</b> of a build. Directory entries (e.g. <c>logs</c>) are skipped: the children
+		/// listing returns folders too, but they carry a <c>children</c> href instead of a <c>content</c> href and
+		/// 404 when fetched as content - so the download path only ever sees real, downloadable files.
+		/// </summary>
 		public async Task<List<ArtifactFile>> ListArtifactsAsync(long id)
 		{
-			string json = await GetAsync("/app/rest/builds/id:" + id + "/artifacts/children?fields=file(name,size)");
+			string json = await GetAsync("/app/rest/builds/id:" + id + "/artifacts/children?fields=file(name,size,content(href))");
 			ArtifactListDto list = JsonUtility.FromJson<ArtifactListDto>(json);
 
 			List<ArtifactFile> result = new List<ArtifactFile>();
 			if (list != null && list.file != null)
 			{
-				foreach (ArtifactFileDto dto in list.file) result.Add(new ArtifactFile(dto.name, dto.size));
+				foreach (ArtifactFileDto dto in list.file)
+				{
+					if (dto.content == null || string.IsNullOrEmpty(dto.content.href)) continue; // directory, not a file
+					result.Add(new ArtifactFile(dto.name, dto.size));
+				}
 			}
 
 			return result;
@@ -294,7 +302,8 @@ namespace Ateo.Build
 		[Serializable] private sealed class BuildDto { public long id; public string number; public string state; public string status; public string statusText; public int percentageComplete; public string webUrl; public string buildTypeId; public AgentDto agent; public PropertiesDto properties; }
 		[Serializable] private sealed class AgentDto { public string name; }
 		[Serializable] private sealed class BuildListDto { public BuildDto[] build; }
-		[Serializable] private sealed class ArtifactFileDto { public string name; public long size; }
+		[Serializable] private sealed class ArtifactFileDto { public string name; public long size; public HrefDto content; }
+		[Serializable] private sealed class HrefDto { public string href; }
 		[Serializable] private sealed class ArtifactListDto { public ArtifactFileDto[] file; }
 		[Serializable] private sealed class BuildTypeDto { public string id; public ParamsDto parameters; }
 		[Serializable] private sealed class ParamsDto { public PropertyDto[] property; }
