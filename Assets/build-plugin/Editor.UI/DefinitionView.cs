@@ -43,6 +43,9 @@ namespace Ateo.Build
 		private bool _loading;
 		private string _localStatus = "";
 
+		private static GUIStyle _rightMini;
+		private static GUIStyle RightMini => _rightMini ??= new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
+
 		#endregion
 
 		#region Constructor
@@ -112,33 +115,71 @@ namespace Ateo.Build
 					EditorGUILayout.LabelField(_loading ? "Loading..." : "No builds found (local or server).", EditorStyles.miniLabel);
 				}
 
-				foreach (BuildRow row in _builds)
-				{
-					SirenixEditorGUI.BeginBox();
-					using (new EditorGUILayout.HorizontalScope())
-					{
-						string tag = (row.Live ? "● " : "") + row.Title;
-						EditorGUILayout.LabelField(tag, row.Live ? EditorStyles.boldLabel : EditorStyles.label, GUILayout.Width(200));
-						EditorGUILayout.LabelField(row.Detail, EditorStyles.miniLabel);
-
-						GUILayout.FlexibleSpace();
-						EditorGUILayout.LabelField(row.LocalPresent ? "local" : "", EditorStyles.miniLabel, GUILayout.Width(40));
-						EditorGUILayout.LabelField(row.OnServer ? "server" : "", EditorStyles.miniLabel, GUILayout.Width(46));
-
-						if (!string.IsNullOrEmpty(row.WebUrl) && GUILayout.Button("Open", GUILayout.Width(50)))
-						{
-							Application.OpenURL(_owner.ResolveServerLink(row.WebUrl));
-						}
-
-						if (row.OnServer && !row.LocalPresent && row.ServerId > 0 && GUILayout.Button("Download", GUILayout.Width(80)))
-						{
-							DownloadBuild(row);
-						}
-					}
-					SirenixEditorGUI.EndBox();
-				}
+				foreach (BuildRow row in _builds) DrawBuildRow(row);
 			}
 			SirenixEditorGUI.EndBox();
+		}
+
+		/// <summary>
+		/// One build row, laid out by explicit rects so it never forces a content-pane minimum width: the action
+		/// buttons are anchored to the right edge and the title/detail take the remaining space (truncating when
+		/// narrow) instead of pushing the buttons off-screen. A downloaded server build is a single row (server +
+		/// local), so its Download is replaced by "Go to folder".
+		/// </summary>
+		private void DrawBuildRow(BuildRow row)
+		{
+			const float pad = 4f;
+			Rect rect = EditorGUILayout.GetControlRect(false, 24f);
+
+			if (Event.current.type == EventType.Repaint)
+			{
+				EditorGUI.DrawRect(new Rect(rect.x, rect.yMax - 1f, rect.width, 1f), new Color(0f, 0f, 0f, 0.2f));
+			}
+
+			float btnH = 20f;
+			float btnY = rect.y + (rect.height - btnH) * 0.5f;
+			float right = rect.xMax - pad;
+
+			// Right-anchored actions, drawn right-to-left.
+			if (row.LocalPresent && !string.IsNullOrEmpty(row.LocalPath))
+			{
+				right = DrawRowButton(ref right, btnY, btnH, 96f, new GUIContent("Go to folder", row.LocalPath),
+					() => EditorUtility.RevealInFinder(row.LocalPath));
+			}
+			else if (row.OnServer && row.ServerId > 0)
+			{
+				right = DrawRowButton(ref right, btnY, btnH, 84f, new GUIContent("Download", "Download this build's artifacts"),
+					() => DownloadBuild(row));
+			}
+
+			if (row.OnServer && !string.IsNullOrEmpty(row.WebUrl))
+			{
+				right = DrawRowButton(ref right, btnY, btnH, 116f, new GUIContent("Open in TeamCity", "Open this build in the TeamCity web UI"),
+					() => Application.OpenURL(_owner.ResolveServerLink(row.WebUrl)));
+			}
+
+			// Source tag (server · local), right-aligned in the space left of the buttons.
+			string source = row.OnServer && row.LocalPresent ? "server · local" : row.OnServer ? "server" : "local";
+			GUIContent sourceContent = new GUIContent(source);
+			float sourceW = EditorStyles.miniLabel.CalcSize(sourceContent).x + 6f;
+			GUI.Label(new Rect(right - sourceW, rect.y, sourceW, rect.height), sourceContent, RightMini);
+			right = right - sourceW - pad;
+
+			// Title + detail fill what remains (truncating before the buttons).
+			float titleW = 56f;
+			Rect titleRect = new Rect(rect.x + pad, rect.y, titleW, rect.height);
+			GUI.Label(titleRect, (row.Live ? "● " : "") + row.Title, row.Live ? EditorStyles.boldLabel : EditorStyles.label);
+
+			float detailW = Mathf.Max(0f, right - titleRect.xMax - pad);
+			GUI.Label(new Rect(titleRect.xMax + pad, rect.y, detailW, rect.height),
+				new GUIContent(row.Detail, row.Detail), EditorStyles.miniLabel);
+		}
+
+		private static float DrawRowButton(ref float right, float y, float height, float width, GUIContent content, Action onClick)
+		{
+			Rect r = new Rect(right - width, y, width, height);
+			if (GUI.Button(r, content)) onClick();
+			return r.x - 4f;
 		}
 
 		private void DrawOverrides()
@@ -322,6 +363,7 @@ namespace Ateo.Build
 		private async Task LoadBuildsAsync(BuildPanel owner)
 		{
 			List<BuildRow> rows = new List<BuildRow>();
+			Dictionary<long, BuildRow> byServerId = new Dictionary<long, BuildRow>();
 
 			// Server builds (filtered by game + definition's executor) - live rows first.
 			if (!string.IsNullOrEmpty(owner.Token))
@@ -339,7 +381,7 @@ namespace Ateo.Build
 						{
 							if (build.Definition != null && build.Definition != _definition.DefinitionName) continue;
 
-							rows.Add(new BuildRow
+							BuildRow row = new BuildRow
 							{
 								Title = "#" + build.Number,
 								Detail = DescribeState(build),
@@ -347,21 +389,34 @@ namespace Ateo.Build
 								ServerId = build.Id,
 								WebUrl = build.WebUrl,
 								Live = build.IsQueued || build.IsRunning
-							});
+							};
+							rows.Add(row);
+							byServerId[build.Id] = row;
 						}
 					}
 				}
 			}
 
-			// On-disk builds (Builds/<definition>/<version>[_<buildNumber>]/).
+			// On-disk builds (Builds/<definition>/...). A "server_<id>" folder is a downloaded server build:
+			// fold it into that server row (one entry per build) instead of listing it twice.
 			string dir = Path.Combine(BuildPanel.ProjectRoot, "Builds", _definition.DefinitionName);
 			if (Directory.Exists(dir))
 			{
 				foreach (string sub in Directory.GetDirectories(dir))
 				{
+					string name = Path.GetFileName(sub);
+					if (name.StartsWith("server_", StringComparison.Ordinal) &&
+						long.TryParse(name.Substring("server_".Length), out long serverId) &&
+						byServerId.TryGetValue(serverId, out BuildRow existing))
+					{
+						existing.LocalPresent = true;
+						existing.LocalPath = sub;
+						continue;
+					}
+
 					rows.Add(new BuildRow
 					{
-						Title = Path.GetFileName(sub),
+						Title = name,
 						Detail = "on disk",
 						LocalPresent = true,
 						LocalPath = sub
@@ -565,7 +620,9 @@ namespace Ateo.Build
 		{
 			if (build.IsRunning) return "running " + build.PercentageComplete + "%  " + build.StatusText;
 			if (build.IsQueued) return "queued #" + build.Number;
-			return build.Status + "  " + build.StatusText;
+			// StatusText is the human-readable form ("Success" / "Tests failed: ..."); Status is the enum token
+			// ("SUCCESS") - showing both gave "SUCCESS  Success". Prefer the readable one, fall back to the token.
+			return !string.IsNullOrEmpty(build.StatusText) ? build.StatusText : build.Status;
 		}
 
 		#endregion

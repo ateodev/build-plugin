@@ -40,6 +40,8 @@ namespace Ateo.Build
 		private bool _pollingHooked;
 		private double _lastPoll;
 
+		private const float StatusBarHeight = 34f;
+
 		#endregion
 
 		#region Properties
@@ -122,11 +124,6 @@ namespace Ateo.Build
 			}
 			SirenixEditorGUI.EndHorizontalToolbar();
 
-			if (!string.IsNullOrEmpty(_status))
-			{
-				SirenixEditorGUI.MessageBox(_status, MessageType.Info);
-			}
-
 			if (_project == null)
 			{
 				SirenixEditorGUI.MessageBox(
@@ -140,7 +137,43 @@ namespace Ateo.Build
 		protected override void OnImGUI()
 		{
 			EnsurePolling();
+
+			if (string.IsNullOrEmpty(_status))
+			{
+				base.OnImGUI();
+				return;
+			}
+
+			// Reserve a fixed strip at the very bottom for the status bar so it floats at the edge instead of
+			// pushing the whole UI down each time a message appears. The main UI draws in the area above it.
+			GUILayout.BeginArea(new Rect(0f, 0f, position.width, position.height - StatusBarHeight));
 			base.OnImGUI();
+			GUILayout.EndArea();
+
+			DrawStatusBar(new Rect(0f, position.height - StatusBarHeight, position.width, StatusBarHeight));
+		}
+
+		private void DrawStatusBar(Rect rect)
+		{
+			if (Event.current.type == EventType.Repaint)
+			{
+				EditorGUI.DrawRect(rect, new Color(0.18f, 0.18f, 0.18f));
+				EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 1f), new Color(0f, 0f, 0f, 0.45f));
+			}
+
+			GUILayout.BeginArea(new Rect(rect.x + 8f, rect.y, rect.width - 16f, rect.height));
+			using (new EditorGUILayout.HorizontalScope())
+			{
+				GUILayout.Label(EditorGUIUtility.IconContent("console.infoicon.sml"), GUILayout.Width(20f), GUILayout.Height(rect.height));
+				GUILayout.Label(_status, EditorStyles.wordWrappedLabel, GUILayout.Height(rect.height));
+				GUILayout.FlexibleSpace();
+				if (GUILayout.Button(new GUIContent("✕", "Dismiss"), GUILayout.Width(26f), GUILayout.Height(20f)))
+				{
+					_status = "";
+					Repaint();
+				}
+			}
+			GUILayout.EndArea();
 		}
 
 		protected override void OnDestroy()
