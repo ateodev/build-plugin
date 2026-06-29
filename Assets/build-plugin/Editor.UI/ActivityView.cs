@@ -83,7 +83,7 @@ namespace Ateo.Build
 
 				if (!string.IsNullOrEmpty(build.WebUrl) && GUILayout.Button("Open", GUILayout.Width(50)))
 				{
-					Application.OpenURL(build.WebUrl);
+					Application.OpenURL(_owner.ResolveServerLink(build.WebUrl));
 				}
 
 				bool isThisGame = _owner.Project != null && build.Definition != null &&

@@ -164,6 +164,27 @@ namespace Ateo.Build
 			return new TeamCityClient(_baseUrl, Token);
 		}
 
+		/// <summary>
+		/// Rewrite a server-emitted link (TeamCity's <c>webUrl</c>, built from the server's configured root URL) onto
+		/// the origin the panel is actually configured to reach. On a dev machine that origin equals the root URL, so
+		/// this is a no-op; on the build-server box (panel pointed at <c>localhost:8111</c>) it makes "Open" resolve
+		/// instead of pointing the browser at an externally-only hostname. Path/query/fragment are preserved.
+		/// </summary>
+		internal string ResolveServerLink(string webUrl)
+		{
+			if (string.IsNullOrEmpty(webUrl) || string.IsNullOrEmpty(_baseUrl)) return webUrl;
+
+			try
+			{
+				Uri link = new Uri(webUrl);
+				return _baseUrl.TrimEnd('/') + link.PathAndQuery + link.Fragment;
+			}
+			catch (UriFormatException)
+			{
+				return webUrl;
+			}
+		}
+
 		/// <summary>Run an editor-async task, surfacing any error into the panel status and repainting on completion.</summary>
 		internal async void RunAsync(Task task, Action onDone = null)
 		{

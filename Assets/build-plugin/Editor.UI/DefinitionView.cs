@@ -127,7 +127,7 @@ namespace Ateo.Build
 
 						if (!string.IsNullOrEmpty(row.WebUrl) && GUILayout.Button("Open", GUILayout.Width(50)))
 						{
-							Application.OpenURL(row.WebUrl);
+							Application.OpenURL(_owner.ResolveServerLink(row.WebUrl));
 						}
 
 						if (row.OnServer && !row.LocalPresent && row.ServerId > 0 && GUILayout.Button("Download", GUILayout.Width(80)))
