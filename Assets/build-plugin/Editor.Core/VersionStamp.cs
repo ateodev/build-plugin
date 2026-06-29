@@ -6,9 +6,10 @@ namespace Ateo.Build
 {
 	/// <summary>
 	/// Applies CI version overrides to PlayerSettings before a build, and records what was stamped on the
-	/// context. Precedence for every value: explicit env override &gt; (build-counter env, supplied by CI) &gt;
-	/// committed ProjectSettings. Reads the same env vars the build server's executor injects from the
-	/// <c>unitybuild.version.*</c> params:
+	/// context. Precedence for every value: an explicit env override &gt; the committed PlayerSettings value -
+	/// there is NO build-counter fallback (the committed ProjectSettings value is the per-game source of truth,
+	/// §5.6/§12.3; CI never injects a counter, which keeps this compatible with a read-only repo). Reads the
+	/// same env vars the build server's executor injects from the <c>unitybuild.version.*</c> params:
 	///   - <c>BUILD_VERSION_NAME</c>  -&gt; PlayerSettings.bundleVersion   (marketing version)
 	///   - <c>ANDROID_VERSION_CODE</c> -&gt; PlayerSettings.Android.bundleVersionCode
 	///   - <c>IOS_BUILD_NUMBER</c>     -&gt; PlayerSettings.iOS.buildNumber

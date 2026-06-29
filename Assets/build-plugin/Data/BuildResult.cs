@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
@@ -12,6 +13,18 @@ namespace Ateo.Build
 	[Serializable]
 	public sealed class BuildResult
 	{
+		#region Types
+
+		/// <summary>One key/value pair contributed by a post-build action (JsonUtility can't serialize a Dictionary).</summary>
+		[Serializable]
+		public struct MetaEntry
+		{
+			public string Key;
+			public string Value;
+		}
+
+		#endregion
+
 		#region Fields
 
 		public bool Success;
@@ -22,6 +35,9 @@ namespace Ateo.Build
 		public int VersionCode;          // version/build code actually stamped
 		public long DurationSeconds;
 		public string Error;             // populated on failure
+
+		/// <summary>Metadata merged from the post-build-action pipeline (e.g. a TestFlight / store URL).</summary>
+		public List<MetaEntry> Metadata = new List<MetaEntry>();
 
 		#endregion
 

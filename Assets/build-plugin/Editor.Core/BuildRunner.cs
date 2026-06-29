@@ -115,7 +115,33 @@ namespace Ateo.Build
 					Debug.LogError("[Build] build step threw: " + exception);
 				}
 
-				// 8. Post-build steps (always run, success or failure).
+				// 8. Post-build action pipeline (v2 typed contract, §10) - runs the definition's ordered
+				//    PostBuildActions on the just-built artifact BEFORE the result is finalized/written. Only
+				//    when the build produced an artifact to act on; a pipeline failure fails the whole build.
+				if (result.Success)
+				{
+					try
+					{
+						context.BuildFolder = string.IsNullOrEmpty(result.ArtifactPath)
+							? null
+							: Path.GetDirectoryName(result.ArtifactPath);
+						context.ArtifactPaths = string.IsNullOrEmpty(result.ArtifactPath)
+							? new List<string>()
+							: new List<string> { result.ArtifactPath };
+						context.Log = MakeProgressLog(context);
+
+						ExecutePostBuildActions(context, definition, definition.PostBuildActions, definition.OutputKind, result);
+					}
+					catch (Exception exception)
+					{
+						result.Success = false;
+						result.ArtifactPath = "";
+						result.Error = exception.Message;
+						Debug.LogError("[Build] post-build pipeline FAILED: " + exception.Message);
+					}
+				}
+
+				// 9. Legacy post-build steps (always run, success or failure).
 				foreach (BuildStep step in definition.PostSteps)
 				{
 					if (step == null) continue;
@@ -284,6 +310,240 @@ namespace Ateo.Build
 				VersionName = context.VersionName,
 				VersionCode = context.VersionCode
 			};
+		}
+
+		#endregion
+
+		#region Private Methods - Post-Build Action Pipeline
+
+		/// <summary>
+		/// Runs an ordered <see cref="PostBuildAction"/> pipeline over the just-built artifact (§10). Seeds the
+		/// available-artifact set with <paramref name="seed"/> (the definition's <see cref="BuildDefinition.OutputKind"/>),
+		/// then for each action: gates by run-location, an env skip-set, and host capabilities; validates the
+		/// declarative artifact flow (Consumes/Produces); runs it; and on success grows the available set and merges
+		/// metadata onto <paramref name="result"/>. Any "configured-but-can't-run", artifact-flow, or fatal-failure
+		/// condition THROWS - the caller turns that into an overall build failure (exit 1). Internal so the headless
+		/// smoke test can drive it directly. <paramref name="result"/> may be null (metadata merge is then skipped).
+		/// </summary>
+		internal static void ExecutePostBuildActions(BuildContext context, BuildDefinition definition,
+			IReadOnlyList<PostBuildAction> actions, ArtifactKind seed, BuildResult result)
+		{
+			if (actions == null || actions.Count == 0) return;
+
+			HashSet<ArtifactKind> available = new HashSet<ArtifactKind> { seed };
+			HashSet<string> skip = ReadActionSkipSet();
+			RunLocation here = context.IsBatchMode ? RunLocation.Remote : RunLocation.Local;
+			Action<string> log = context.Log ?? (message => Debug.Log("[Build] " + message));
+
+			foreach (PostBuildAction action in actions)
+			{
+				if (action == null) continue;
+
+				string name = action.DisplayName;
+
+				// Applicability - author intent (RunLocation): skip when it isn't meant for this context.
+				if (action.RunLocation != RunLocation.Both && action.RunLocation != here)
+				{
+					log("action '" + name + "' skipped: not for this run location (" + here + ").");
+					continue;
+				}
+
+				// Per-build skip-set (env BUILD_ACTIONS_SKIP = comma-separated GUIDs).
+				if (!string.IsNullOrEmpty(action.Id) && skip.Contains(action.Id))
+				{
+					log("action '" + name + "' skipped: id in BUILD_ACTIONS_SKIP.");
+					continue;
+				}
+
+				// Capability gate (hard): it was configured to run here, so an unmet requirement fails the build.
+				string unmet = FindUnmetRequirement(action);
+				if (unmet != null)
+				{
+					throw new Exception("Post-build action '" + name + "' is configured to run here but cannot: " +
+						unmet + ".");
+				}
+
+				// Artifact-flow validation: its input must have been produced by an earlier step (or be the seed).
+				if (action.Consumes != ArtifactKind.None && !available.Contains(action.Consumes))
+				{
+					throw new Exception("action '" + name + "' needs " + action.Consumes +
+						" but no prior step produced it.");
+				}
+
+				// Run (await synchronously - batch mode has no sync context, so GetResult cannot deadlock).
+				log("post-build action: " + name);
+				ActionResult actionResult = action.ExecuteAsync(context, definition).GetAwaiter().GetResult()
+					?? throw new Exception("Post-build action '" + name + "' returned a null result.");
+
+				if (!actionResult.Success)
+				{
+					if (actionResult.Fatal)
+					{
+						throw new Exception("Post-build action '" + name + "' failed: " + actionResult.Message);
+					}
+
+					Debug.LogWarning("[Build] post-build action '" + name + "' failed (non-fatal), continuing: " +
+						actionResult.Message);
+					continue;
+				}
+
+				if (action.Produces != ArtifactKind.None) available.Add(action.Produces);
+				MergeMetadata(result, actionResult.Metadata);
+				if (!string.IsNullOrEmpty(actionResult.Message)) log("action '" + name + "': " + actionResult.Message);
+			}
+		}
+
+		/// <summary>Per-build skip-set of action GUIDs from <c>BUILD_ACTIONS_SKIP</c> (comma-separated, case-insensitive).</summary>
+		private static HashSet<string> ReadActionSkipSet()
+		{
+			HashSet<string> set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			string raw = Environment.GetEnvironmentVariable("BUILD_ACTIONS_SKIP");
+			if (string.IsNullOrEmpty(raw)) return set;
+
+			foreach (string part in raw.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+			{
+				string trimmed = part.Trim();
+				if (!string.IsNullOrEmpty(trimmed)) set.Add(trimmed);
+			}
+
+			return set;
+		}
+
+		/// <summary>
+		/// The hard capability gate: returns a human-readable reason for the first UNMET <see cref="HostRequirement"/>,
+		/// or null when all are satisfied. OS is checked against <see cref="Application.platform"/>; Tool by locating
+		/// the executable on PATH; Device is treated as satisfied (can't probe a connected device headlessly).
+		/// </summary>
+		private static string FindUnmetRequirement(PostBuildAction action)
+		{
+			foreach (HostRequirement requirement in action.HostRequirements)
+			{
+				switch (requirement.Kind)
+				{
+					case HostRequirement.HostKind.OperatingSystem:
+						if (!CurrentOsMatches(requirement.Value))
+						{
+							return "requires OS '" + requirement.Value + "' (host is " + Application.platform + ")";
+						}
+
+						break;
+					case HostRequirement.HostKind.Tool:
+						if (!ToolOnPath(requirement.Value))
+						{
+							return "requires tool '" + requirement.Value + "' on PATH";
+						}
+
+						break;
+					case HostRequirement.HostKind.Device:
+						// Device presence can't be checked in a headless build - treated as satisfied for now.
+						break;
+				}
+			}
+
+			return null;
+		}
+
+		private static bool CurrentOsMatches(string os)
+		{
+			if (string.IsNullOrEmpty(os)) return true;
+
+			RuntimePlatform platform = Application.platform;
+			bool isMac = platform == RuntimePlatform.OSXEditor || platform == RuntimePlatform.OSXPlayer;
+			bool isWindows = platform == RuntimePlatform.WindowsEditor || platform == RuntimePlatform.WindowsPlayer;
+			bool isLinux = platform == RuntimePlatform.LinuxEditor || platform == RuntimePlatform.LinuxPlayer;
+
+			switch (os.Trim().ToLowerInvariant())
+			{
+				case "macos":
+				case "osx":
+				case "mac":
+					return isMac;
+				case "windows":
+				case "win":
+					return isWindows;
+				case "linux":
+					return isLinux;
+				default:
+					return false;
+			}
+		}
+
+		private static bool ToolOnPath(string tool)
+		{
+			if (string.IsNullOrEmpty(tool)) return true;
+
+			string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+			RuntimePlatform platform = Application.platform;
+			bool isWindows = platform == RuntimePlatform.WindowsEditor || platform == RuntimePlatform.WindowsPlayer;
+
+			List<string> extensions = new List<string> { "" };
+			if (isWindows)
+			{
+				string pathExt = Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD";
+				foreach (string ext in pathExt.Split(';'))
+				{
+					if (!string.IsNullOrEmpty(ext)) extensions.Add(ext);
+				}
+			}
+
+			foreach (string directory in path.Split(Path.PathSeparator))
+			{
+				string trimmed = directory.Trim();
+				if (string.IsNullOrEmpty(trimmed)) continue;
+
+				foreach (string ext in extensions)
+				{
+					try
+					{
+						if (File.Exists(Path.Combine(trimmed, tool + ext))) return true;
+					}
+					catch (Exception)
+					{
+						// Malformed PATH entry - ignore and keep scanning.
+					}
+				}
+			}
+
+			return false;
+		}
+
+		private static void MergeMetadata(BuildResult result, Dictionary<string, string> metadata)
+		{
+			if (result == null || metadata == null || metadata.Count == 0) return;
+
+			foreach (KeyValuePair<string, string> pair in metadata)
+			{
+				result.Metadata.Add(new BuildResult.MetaEntry { Key = pair.Key, Value = pair.Value });
+			}
+		}
+
+		/// <summary>
+		/// Builds the <see cref="BuildContext.Log"/> hook the pipeline uses for phase text: writes to the Unity log
+		/// AND, under CI batch mode, emits a TeamCity <c>##teamcity[progressMessage '...']</c> service line on stdout
+		/// so the phase surfaces in the build's progress (mirrors §5.5).
+		/// </summary>
+		private static Action<string> MakeProgressLog(BuildContext context)
+		{
+			bool batch = context.IsBatchMode;
+			return message =>
+			{
+				Debug.Log("[Build] " + message);
+				if (batch) Console.WriteLine("##teamcity[progressMessage '" + EscapeTeamCity(message) + "']");
+			};
+		}
+
+		/// <summary>Escapes a string for a TeamCity service-message value (| ' [ ] and newlines).</summary>
+		private static string EscapeTeamCity(string value)
+		{
+			if (string.IsNullOrEmpty(value)) return "";
+
+			return value
+				.Replace("|", "||")
+				.Replace("'", "|'")
+				.Replace("\n", "|n")
+				.Replace("\r", "|r")
+				.Replace("[", "|[")
+				.Replace("]", "|]");
 		}
 
 		#endregion
