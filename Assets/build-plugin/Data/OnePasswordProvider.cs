@@ -18,12 +18,12 @@ namespace Ateo.Build
 		/// <summary>The scheme this provider serves; references like <c>op://...</c> dispatch here.</summary>
 		public const string SchemeName = "op";
 
-		// TODO: source vault + account from ProjectConfig provider config (§11.1) instead of these constants.
-		/// <summary>The single shared 1Password vault holding every build secret (§11.3).</summary>
+		/// <summary>Fallback vault when no <see cref="ProjectConfig"/> supplies one: the single shared vault (§11.3).</summary>
 		public const string DefaultVault = "Build Server";
 
-		/// <summary>The 1Password account shorthand the CLI authenticates as (build-server@ateo.ch).</summary>
-		public const string DefaultAccount = "ateoteam";
+		/// <summary>Fallback account when no <see cref="ProjectConfig"/> supplies one. The machine-stable sign-in
+		/// ADDRESS (identical on every machine), not the local <c>op account add</c> shorthand which varies per dev box.</summary>
+		public const string DefaultAccount = "ateoteam.1password.com";
 
 		#endregion
 
@@ -37,8 +37,10 @@ namespace Ateo.Build
 
 		#region Constructor
 
-		/// <summary>Production constructor: a real <see cref="OpCli"/> against the default vault + account.</summary>
-		public OnePasswordProvider() : this(new OpCli(), DefaultVault, DefaultAccount)
+		/// <summary>Production constructor: a real <see cref="OpCli"/> against the given vault + account
+		/// (from <see cref="ProjectConfig"/>); falls back to the defaults when not supplied.</summary>
+		public OnePasswordProvider(string vault = DefaultVault, string account = DefaultAccount)
+			: this(new OpCli(), vault, account)
 		{
 		}
 

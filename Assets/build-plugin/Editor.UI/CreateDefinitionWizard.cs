@@ -274,8 +274,11 @@ namespace Ateo.Build
 
 			bool generated = GenerateKeystore(keystorePath);
 
-			string game = _owner != null && _owner.Project != null ? _owner.Project.GameToken : "game";
-			ISecretProvider provider = new OnePasswordProvider();
+			ProjectConfig project = _owner != null ? _owner.Project : null;
+			string game = project != null ? project.GameToken : "game";
+			ISecretProvider provider = project != null
+				? new OnePasswordProvider(project.SecretProviderVault, project.SecretProviderAccount)
+				: new OnePasswordProvider();
 			string item = game + "-android-signing";
 
 			if (generated)

@@ -448,7 +448,7 @@ namespace Ateo.Build
 				}
 
 				SecretRef secretRef = declaration.Ref;
-				ISecretProvider provider = ResolveSecretProvider(secretRef.Scheme);
+				ISecretProvider provider = ResolveSecretProvider(secretRef.Scheme, context.Project);
 				if (provider == null)
 				{
 					throw new Exception("action '" + action.DisplayName + "': no secret provider is registered for scheme '" +
@@ -474,12 +474,12 @@ namespace Ateo.Build
 		/// The scheme -> provider registry. Minimal for now (only 1Password / "op"); a second provider (OpenBao,
 		/// §11.4) slots in here behind the same <see cref="ISecretProvider"/> seam. Returns null for an unknown scheme.
 		/// </summary>
-		private static ISecretProvider ResolveSecretProvider(string scheme)
+		private static ISecretProvider ResolveSecretProvider(string scheme, ProjectConfig project)
 		{
 			switch (scheme)
 			{
 				case OnePasswordProvider.SchemeName:
-					return new OnePasswordProvider();
+					return new OnePasswordProvider(project.SecretProviderVault, project.SecretProviderAccount);
 				default:
 					return null;
 			}

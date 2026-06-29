@@ -125,13 +125,13 @@ namespace Ateo.Build
 			{
 				if (declaration == null || string.IsNullOrEmpty(declaration.LogicalKey)) continue;
 
-				_serverPresence[declaration.LogicalKey] = await ProbeAsync(declaration);
+				_serverPresence[declaration.LogicalKey] = await ProbeAsync(declaration, _project);
 			}
 		}
 
-		private static async Task<string> ProbeAsync(SecretDeclaration declaration)
+		private static async Task<string> ProbeAsync(SecretDeclaration declaration, ProjectConfig project)
 		{
-			ISecretProvider provider = ProviderFor(declaration.Ref.Scheme);
+			ISecretProvider provider = ProviderFor(declaration.Ref.Scheme, project);
 			if (provider == null || !provider.Caps.Presence) return "unknown";
 
 			try
@@ -146,12 +146,12 @@ namespace Ateo.Build
 			}
 		}
 
-		private static ISecretProvider ProviderFor(string scheme)
+		private static ISecretProvider ProviderFor(string scheme, ProjectConfig project)
 		{
 			switch (scheme)
 			{
 				case OnePasswordProvider.SchemeName:
-					return new OnePasswordProvider();
+					return new OnePasswordProvider(project.SecretProviderVault, project.SecretProviderAccount);
 				default:
 					return null;
 			}
