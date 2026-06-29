@@ -153,9 +153,9 @@ namespace Ateo.Build
 #endif
 
 			// Legacy path: no profile, build from the definition's scene list for the active target.
-			if (definition.Platform == BuildPlatform.Android)
+			if (definition is AndroidBuildDefinition android)
 			{
-				EditorUserBuildSettings.buildAppBundle = definition.Output == AndroidOutput.AAB;
+				EditorUserBuildSettings.buildAppBundle = android.Output == AndroidOutput.AAB;
 			}
 
 			BuildPlayerOptions options = new BuildPlayerOptions
@@ -358,9 +358,9 @@ namespace Ateo.Build
 
 		private static void ApplyAndroidSigning(BuildDefinition definition, BuildContext context)
 		{
-			if (definition.Platform != BuildPlatform.Android || !definition.Signing.IsConfigured) return;
+			if (!(definition is AndroidBuildDefinition android) || !android.Signing.IsConfigured) return;
 
-			AndroidSigning signing = definition.Signing;
+			AndroidSigning signing = android.Signing;
 			string keystorePath = Path.IsPathRooted(signing.KeystoreFile)
 				? signing.KeystoreFile
 				: Path.GetFullPath(Path.Combine(CheckoutRoot(), signing.KeystoreFile));
@@ -386,11 +386,17 @@ namespace Ateo.Build
 		private static string ResolveOutputPath(BuildDefinition definition, BuildContext context)
 		{
 			string extension;
-			switch (definition.Platform)
+			if (definition is AndroidBuildDefinition android)
 			{
-				case BuildPlatform.Android:           extension = definition.Output == AndroidOutput.AAB ? ".aab" : ".apk"; break;
-				case BuildPlatform.WindowsStandalone: extension = ".exe"; break;
-				default:                              extension = ""; break; // iOS/Mac/Linux/WebGL produce a folder; refined later.
+				extension = android.Output == AndroidOutput.AAB ? ".aab" : ".apk";
+			}
+			else if (definition.Platform == BuildPlatform.WindowsStandalone)
+			{
+				extension = ".exe";
+			}
+			else
+			{
+				extension = ""; // iOS/Mac/Linux/WebGL produce a folder; refined later.
 			}
 
 			string fileName = string.IsNullOrEmpty(definition.OutputFileName)
@@ -436,8 +442,8 @@ namespace Ateo.Build
 			string directory = Path.Combine(CheckoutRoot(), "Builds");
 			if (!Directory.Exists(directory)) return "";
 
-			string pattern = context.Platform == BuildPlatform.Android
-				? (context.Definition.Output == AndroidOutput.AAB ? "*.aab" : "*.apk")
+			string pattern = context.Definition is AndroidBuildDefinition android
+				? (android.Output == AndroidOutput.AAB ? "*.aab" : "*.apk")
 				: "*";
 			return Directory.EnumerateFiles(directory, pattern, SearchOption.AllDirectories).FirstOrDefault() ?? "";
 		}

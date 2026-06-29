@@ -48,4 +48,52 @@ namespace Ateo.Build
 
 		#endregion
 	}
+
+	/// <summary>
+	/// iOS signing, expressed as REFERENCES only - never the secret itself (mirrors <see cref="AndroidSigning"/>).
+	/// The asset is safe to commit: it names the Apple Developer team + provisioning profile and the ENV VAR
+	/// NAMES that will hold the fastlane match passphrase + App Store Connect API key at build time. CI injects
+	/// the actual values into those env vars (resolved agent-side from the build server's per-game secret store);
+	/// local devs export them from a gitignored override. Unity's iOS build produces an Xcode project; the actual
+	/// codesign/match step runs in the post-build pipeline (see the BuildIPA action), which reads these references.
+	/// </summary>
+	[Serializable]
+	public struct iOSSigning
+	{
+		#region Fields
+
+		/// <summary>Apple Developer Team ID (e.g. "ABCDE12345").</summary>
+		public string AppleTeamId;
+
+		/// <summary>Provisioning profile name / specifier (e.g. "match AppStore com.ateo.game").</summary>
+		public string ProvisioningProfile;
+
+		/// <summary>Name of the env var holding the fastlane match passphrase (default "MATCH_PASSWORD").</summary>
+		public string MatchPasswordEnv;
+
+		/// <summary>Name of the env var holding the App Store Connect API key reference (default "ASC_API_KEY").</summary>
+		public string AscApiKeyEnv;
+
+		#endregion
+
+		#region Constructor
+
+		public iOSSigning(string appleTeamId, string provisioningProfile, string matchPasswordEnv, string ascApiKeyEnv)
+		{
+			AppleTeamId = appleTeamId;
+			ProvisioningProfile = provisioningProfile;
+			MatchPasswordEnv = matchPasswordEnv;
+			AscApiKeyEnv = ascApiKeyEnv;
+		}
+
+		#endregion
+
+		#region Properties
+
+		public string MatchPasswordEnvOrDefault => string.IsNullOrEmpty(MatchPasswordEnv) ? "MATCH_PASSWORD" : MatchPasswordEnv;
+		public string AscApiKeyEnvOrDefault => string.IsNullOrEmpty(AscApiKeyEnv) ? "ASC_API_KEY" : AscApiKeyEnv;
+		public bool IsConfigured => !string.IsNullOrEmpty(AppleTeamId) && !string.IsNullOrEmpty(ProvisioningProfile);
+
+		#endregion
+	}
 }

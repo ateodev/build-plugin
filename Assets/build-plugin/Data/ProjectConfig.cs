@@ -39,6 +39,21 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Pinned Unity version. Empty = read from ProjectSettings/ProjectVersion.txt.")]
 		private string _unityVersion;
 
+		[SerializeField, Tooltip("Slack channel id this project's build notifications post to.")]
+		private string _slackChannelId;
+
+		[SerializeField, Tooltip("Name of the Unity license to build with (matched agent-side to <name>.ulf). Default \"ateo\".")]
+		private string _unityLicenseName = "ateo";
+
+		[SerializeField, Tooltip("Name of the reusable checkout credential (in the credential registry) the server uses for this repo.")]
+		private string _vcsCredentialName;
+
+		[SerializeField, Tooltip("Secret-provider scheme that resolves this project's references (e.g. \"op\" for 1Password). Default \"op\".")]
+		private string _secretProviderScheme = "op";
+
+		[SerializeField, Tooltip("Non-secret provider config (e.g. 1Password vault/account name, or the OpenBao server URL).")]
+		private string _secretProviderConfig;
+
 		#endregion
 
 		#region Properties
@@ -49,6 +64,11 @@ namespace Ateo.Build
 		public string TeamId => _teamId;
 		public string ServerBaseUrl => _serverBaseUrl;
 		public string UnityVersion => _unityVersion;
+		public string SlackChannelId => _slackChannelId;
+		public string UnityLicenseName => _unityLicenseName;
+		public string VcsCredentialName => _vcsCredentialName;
+		public string SecretProviderScheme => _secretProviderScheme;
+		public string SecretProviderConfig => _secretProviderConfig;
 
 		#endregion
 	}

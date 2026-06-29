@@ -14,20 +14,18 @@ namespace Ateo.Build
 	/// <see cref="BuildRunner"/> loads and applies it. Wraps a Unity 6 Build Profile (preferred) and adds what
 	/// profiles don't cover: output naming/versioning, signing references, an ordered list of pre/post steps,
 	/// and an optional named-method shim for a game's existing headless builder.
+	///
+	/// ABSTRACT base of a polymorphic hierarchy: every definition is its own asset whose CONCRETE TYPE is the
+	/// target platform (see <see cref="Platform"/>) - so there is no platform enum field, the type drives
+	/// executor resolution, and target-specific data (Android keystore + AAB/APK, iOS signing, ...) lives on
+	/// the concrete leaf subclass. Carries only the fields shared across every target.
 	/// </summary>
-	[CreateAssetMenu(menuName = "Build/Build Definition", fileName = "NewBuildDefinition", order = 0)]
-	public sealed class BuildDefinition : ScriptableObject
+	public abstract class BuildDefinition : ScriptableObject
 	{
 		#region Fields
 
 		[SerializeField, Tooltip("Unique name. Passed as the unitybuild.definition build parameter and used to locate this asset.")]
 		private string _definitionName;
-
-		[SerializeField, Tooltip("Target platform. Selects the Unity build target and which build-server executor to trigger.")]
-		private BuildPlatform _platform = BuildPlatform.Android;
-
-		[SerializeField, Tooltip("Android only: AAB (Play app bundle) or APK (sideloadable).")]
-		private AndroidOutput _androidOutput = AndroidOutput.AAB;
 
 #if UNITY_6000_0_OR_NEWER
 		[SerializeField, Tooltip("Unity 6 Build Profile to build (preferred). If set, platform/scenes/defines/player-settings come from it.")]
@@ -46,9 +44,6 @@ namespace Ateo.Build
 
 		[SerializeField, Tooltip("Output file name without extension. Tokens: {project} {version} {code}. Empty = builder default.")]
 		private string _outputFileName;
-
-		[SerializeField, Tooltip("Android signing references (alias + env-var names). Never the secret itself.")]
-		private AndroidSigning _androidSigning;
 
 		[SerializeField, Tooltip("Ordered steps run BEFORE the player build.")]
 		private List<BuildStep> _preSteps = new List<BuildStep>();
@@ -71,8 +66,6 @@ namespace Ateo.Build
 		#region Properties
 
 		public string DefinitionName => _definitionName;
-		public BuildPlatform Platform => _platform;
-		public AndroidOutput Output => _androidOutput;
 #if UNITY_6000_0_OR_NEWER
 		public BuildProfile Profile => _buildProfile;
 #endif
@@ -80,13 +73,18 @@ namespace Ateo.Build
 		public IReadOnlyList<string> IncludeDefines => _includeDefines;
 		public IReadOnlyList<string> ExcludeDefines => _excludeDefines;
 		public string OutputFileName => _outputFileName;
-		public AndroidSigning Signing => _androidSigning;
 		public IReadOnlyList<BuildStep> PreSteps => _preSteps;
 		public IReadOnlyList<BuildStep> PostSteps => _postSteps;
 		public string DefaultBranch => _defaultBranch;
 		public string BuildMethod => _buildMethod;
 		public string BuildMethodArgs => _buildMethodArgs;
 		public bool UsesGameBuilder => !string.IsNullOrEmpty(_buildMethod);
+
+		/// <summary>The target platform - the concrete subclass IS the platform (replaces the old enum field).</summary>
+		public abstract BuildPlatform Platform { get; }
+
+		/// <summary>The kind of artifact this definition's build produces - seeds the post-build-action pipeline.</summary>
+		public abstract ArtifactKind OutputKind { get; }
 
 		#endregion
 
