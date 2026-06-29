@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -59,6 +60,16 @@ namespace Ateo.Build
 
 		/// <summary>True when this action is valid for the given definition's concrete type. Override for a rare cross-leaf action.</summary>
 		public virtual bool Supports(BuildDefinition def) => SupportedDefinition.IsAssignableFrom(def.GetType());
+
+		/// <summary>
+		/// Whether this action's input is satisfiable from the artifacts <paramref name="available"/> at its point in the
+		/// pipeline. Default: it consumes nothing, or the single primary <see cref="Consumes"/> kind is available. A
+		/// CATEGORY action that accepts a family a single <see cref="Consumes"/> can't express (Steam = any desktop
+		/// standalone; Google Play = AAB or APK) overrides this to accept the family, while keeping <see cref="Consumes"/>
+		/// as its primary declared input (used by the wizard's prerequisite logic). See build-plugin-architecture.md §10.1.
+		/// </summary>
+		public virtual bool CanConsume(IReadOnlyCollection<ArtifactKind> available) =>
+			Consumes == ArtifactKind.None || (available != null && available.Contains(Consumes));
 
 		/// <summary>Run the action against the already-built artifact carried by <paramref name="ctx"/>.</summary>
 		public abstract Task<ActionResult> ExecuteAsync(BuildContext ctx, BuildDefinition def);

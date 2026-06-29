@@ -364,8 +364,9 @@ namespace Ateo.Build
 						unmet + ".");
 				}
 
-				// Artifact-flow validation: its input must have been produced by an earlier step (or be the seed).
-				if (action.Consumes != ArtifactKind.None && !available.Contains(action.Consumes))
+				// Artifact-flow validation: its input must have been produced by an earlier step (or be the seed). A
+				// category action (Steam/Google Play) widens this via CanConsume to accept a family of kinds.
+				if (!action.CanConsume(available))
 				{
 					throw new Exception("action '" + name + "' needs " + action.Consumes +
 						" but no prior step produced it.");
