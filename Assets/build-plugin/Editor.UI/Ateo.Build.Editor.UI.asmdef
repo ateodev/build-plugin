@@ -1,7 +1,10 @@
 {
-  "name": "Ateo.Build.Editor",
+  "name": "Ateo.Build.Editor.UI",
   "rootNamespace": "Ateo.Build",
-  "references": [],
+  "references": [
+    "Ateo.Build.Data",
+    "Ateo.Build.Editor.Core"
+  ],
   "includePlatforms": [
     "Editor"
   ],
