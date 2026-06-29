@@ -51,6 +51,10 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Ordered steps run AFTER the player build.")]
 		private List<BuildStep> _postSteps = new List<BuildStep>();
 
+		[SerializeReference, Tooltip("Ordered post-build actions (v2 contract) run on the built artifact - typed " +
+			"file-based pipeline keyed by Consumes/Produces, separate from the BuildStep lists.")]
+		private List<PostBuildAction> _postBuildActions = new();
+
 		[SerializeField, Tooltip("Default VCS branch this definition builds when no commit/changeset override is given.")]
 		private string _defaultBranch;
 
@@ -75,6 +79,7 @@ namespace Ateo.Build
 		public string OutputFileName => _outputFileName;
 		public IReadOnlyList<BuildStep> PreSteps => _preSteps;
 		public IReadOnlyList<BuildStep> PostSteps => _postSteps;
+		public IReadOnlyList<PostBuildAction> PostBuildActions => _postBuildActions;
 		public string DefaultBranch => _defaultBranch;
 		public string BuildMethod => _buildMethod;
 		public string BuildMethodArgs => _buildMethodArgs;

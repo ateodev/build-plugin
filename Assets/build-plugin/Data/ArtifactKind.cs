@@ -10,6 +10,8 @@ namespace Ateo.Build
 	/// </summary>
 	public enum ArtifactKind
 	{
+		/// <summary>No artifact - used by a terminal / side-effect post-build action's <see cref="PostBuildAction.Produces"/>.</summary>
+		None,
 		XcodeProject,
 		IPA,
 		AAB,
