@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace Ateo.Build
@@ -54,6 +55,10 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Non-secret provider config (e.g. 1Password vault/account name, or the OpenBao server URL).")]
 		private string _secretProviderConfig;
 
+		[SerializeField, Tooltip("Values-free secret registry: maps each code-declared logical key to a scheme-tagged provider " +
+			"reference (never a value). Reconciled by the wizard against the actions' declared RequiredSecrets.")]
+		private List<SecretDeclaration> _secretRegistry = new();
+
 		#endregion
 
 		#region Properties
@@ -69,6 +74,30 @@ namespace Ateo.Build
 		public string VcsCredentialName => _vcsCredentialName;
 		public string SecretProviderScheme => _secretProviderScheme;
 		public string SecretProviderConfig => _secretProviderConfig;
+
+		/// <summary>The committed values-free secret registry (logical key -> scheme-tagged reference; never values).</summary>
+		public IReadOnlyList<SecretDeclaration> SecretRegistry => _secretRegistry;
+
+		#endregion
+
+		#region Public Methods
+
+		/// <summary>
+		/// Looks up the registry entry for a code-declared logical key (the join from a
+		/// <see cref="SecretRequirement.Key"/> to its committed provider reference). Returns null when the key is
+		/// declared in code but not yet registered - the caller turns that into an actionable failure.
+		/// </summary>
+		public SecretDeclaration FindSecret(string logicalKey)
+		{
+			if (string.IsNullOrEmpty(logicalKey) || _secretRegistry == null) return null;
+
+			foreach (SecretDeclaration declaration in _secretRegistry)
+			{
+				if (declaration != null && declaration.LogicalKey == logicalKey) return declaration;
+			}
+
+			return null;
+		}
 
 		#endregion
 	}

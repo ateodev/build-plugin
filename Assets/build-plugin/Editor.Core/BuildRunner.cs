@@ -333,6 +333,7 @@ namespace Ateo.Build
 			HashSet<ArtifactKind> available = new HashSet<ArtifactKind> { seed };
 			HashSet<string> skip = ReadActionSkipSet();
 			RunLocation here = context.IsBatchMode ? RunLocation.Remote : RunLocation.Local;
+			ExecContext execContext = context.IsBatchMode ? ExecContext.Server : ExecContext.Local;
 			Action<string> log = context.Log ?? (message => Debug.Log("[Build] " + message));
 
 			foreach (PostBuildAction action in actions)
@@ -369,6 +370,11 @@ namespace Ateo.Build
 					throw new Exception("action '" + name + "' needs " + action.Consumes +
 						" but no prior step produced it.");
 				}
+
+				// Secret resolution (just-in-time): resolve THIS action's RequiredSecrets through the project's
+				// provider into ctx.Secrets before it runs. A missing registry entry or an op/provider error is a
+				// hard precondition failure (the action can't do its job), so it fails the build with a clear message.
+				ResolveActionSecrets(context, action, execContext, log);
 
 				// Run (await synchronously - batch mode has no sync context, so GetResult cannot deadlock).
 				log("post-build action: " + name);
@@ -407,6 +413,75 @@ namespace Ateo.Build
 			}
 
 			return set;
+		}
+
+		/// <summary>
+		/// Resolves an action's declared <see cref="PostBuildAction.RequiredSecrets"/> into <see cref="BuildContext.Secrets"/>
+		/// just before it runs: each requirement's logical key -> <see cref="ProjectConfig.FindSecret"/> -> the
+		/// scheme-tagged <see cref="SecretRef"/> -> the matching <see cref="ISecretProvider"/>'s
+		/// <see cref="ISecretProvider.ResolveAsync"/>. A declared-but-unregistered key, an unknown scheme, or a
+		/// provider/op error THROWS with an actionable message (the caller turns it into an overall build failure).
+		/// Already-resolved keys are skipped, so a secret shared by several actions resolves once.
+		/// </summary>
+		private static void ResolveActionSecrets(BuildContext context, PostBuildAction action, ExecContext execContext,
+			Action<string> log)
+		{
+			foreach (SecretRequirement requirement in action.RequiredSecrets)
+			{
+				string key = requirement.Key;
+				if (string.IsNullOrEmpty(key)) continue;
+				if (context.Secrets != null && context.Secrets.ContainsKey(key)) continue;
+
+				if (context.Project == null)
+				{
+					throw new Exception("action '" + action.DisplayName + "' requires secret '" + key +
+						"' but no ProjectConfig was found to resolve it.");
+				}
+
+				SecretDeclaration declaration = context.Project.FindSecret(key);
+				if (declaration == null)
+				{
+					throw new Exception("action '" + action.DisplayName + "' requires secret '" + key +
+						"' but it has no entry in the project secret registry - add an op:// reference for '" + key +
+						"' in ProjectConfig.");
+				}
+
+				SecretRef secretRef = declaration.Ref;
+				ISecretProvider provider = ResolveSecretProvider(secretRef.Scheme);
+				if (provider == null)
+				{
+					throw new Exception("action '" + action.DisplayName + "': no secret provider is registered for scheme '" +
+						secretRef.Scheme + "' (secret '" + key + "').");
+				}
+
+				try
+				{
+					SecretValue value = provider.ResolveAsync(secretRef, execContext).GetAwaiter().GetResult()
+						?? throw new Exception("provider returned a null value");
+					(context.Secrets ??= new Dictionary<string, SecretValue>())[key] = value;
+					log("resolved secret '" + key + "'.");
+				}
+				catch (Exception exception)
+				{
+					throw new Exception("action '" + action.DisplayName + "': failed to resolve secret '" + key + "' (" +
+						secretRef.Reference + "): " + exception.Message, exception);
+				}
+			}
+		}
+
+		/// <summary>
+		/// The scheme -> provider registry. Minimal for now (only 1Password / "op"); a second provider (OpenBao,
+		/// §11.4) slots in here behind the same <see cref="ISecretProvider"/> seam. Returns null for an unknown scheme.
+		/// </summary>
+		private static ISecretProvider ResolveSecretProvider(string scheme)
+		{
+			switch (scheme)
+			{
+				case OnePasswordProvider.SchemeName:
+					return new OnePasswordProvider();
+				default:
+					return null;
+			}
 		}
 
 		/// <summary>

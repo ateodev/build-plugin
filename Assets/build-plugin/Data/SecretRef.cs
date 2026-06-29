@@ -16,13 +16,17 @@ namespace Ateo.Build
 		/// <summary>The scheme-tagged reference, e.g. "op://vault/item/field".</summary>
 		public string Reference;
 
+		/// <summary>The shape of the referenced secret - lets a provider route a <see cref="SecretKind.File"/> to a document read. Defaults to <see cref="SecretKind.String"/>.</summary>
+		public SecretKind Kind;
+
 		#endregion
 
 		#region Constructor
 
-		public SecretRef(string reference)
+		public SecretRef(string reference, SecretKind kind = SecretKind.String)
 		{
 			Reference = reference;
+			Kind = kind;
 		}
 
 		#endregion

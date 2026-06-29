@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace Ateo.Build
 {
@@ -37,11 +38,78 @@ namespace Ateo.Build
 		/// <summary>Logger hook - actions call it to emit phase text (-> ##teamcity[progressMessage] on the server).</summary>
 		public Action<string> Log;
 
+		/// <summary>
+		/// Secrets resolved for this build, keyed by the logical key a <see cref="PostBuildAction"/> declared in its
+		/// <see cref="PostBuildAction.RequiredSecrets"/>. Populated by <see cref="BuildRunner"/> just before each
+		/// action runs (resolved through the project's <see cref="ISecretProvider"/>); post-build actions read it via
+		/// <see cref="GetSecretString"/> / <see cref="GetSecretFilePath"/>. Never logged.
+		/// </summary>
+		public Dictionary<string, SecretValue> Secrets = new Dictionary<string, SecretValue>();
+
+		/// <summary>Cache of File-kind secrets already materialized to a temp path, so repeated reads reuse one file.</summary>
+		private readonly Dictionary<string, string> _materializedSecretFiles = new Dictionary<string, string>();
+
 		#endregion
 
 		#region Properties
 
 		public BuildPlatform Platform => Definition != null ? Definition.Platform : BuildPlatform.Android;
+
+		#endregion
+
+		#region Public Methods
+
+		/// <summary>
+		/// The resolved STRING value of a secret by its logical key. Throws when the key wasn't resolved (a missing
+		/// registry entry or provider error fails the action before it runs) or when it is a File secret (use
+		/// <see cref="GetSecretFilePath"/>).
+		/// </summary>
+		public string GetSecretString(string logicalKey)
+		{
+			SecretValue value = RequireSecret(logicalKey);
+			if (value.IsFile)
+			{
+				throw new Exception("Secret '" + logicalKey + "' is a File secret - call GetSecretFilePath instead.");
+			}
+
+			return value.StringValue;
+		}
+
+		/// <summary>
+		/// The path to a FILE secret, materialized to a transient file on first access and cached for the rest of
+		/// the build (so an action that needs the path repeatedly gets one stable file). Throws when the key wasn't
+		/// resolved or is a string secret (use <see cref="GetSecretString"/>). The file lives under the OS temp dir;
+		/// the build is responsible for not persisting it beyond the run.
+		/// </summary>
+		public string GetSecretFilePath(string logicalKey)
+		{
+			SecretValue value = RequireSecret(logicalKey);
+			if (!value.IsFile)
+			{
+				throw new Exception("Secret '" + logicalKey + "' is a String secret - call GetSecretString instead.");
+			}
+
+			if (_materializedSecretFiles.TryGetValue(logicalKey, out string existing) && File.Exists(existing))
+			{
+				return existing;
+			}
+
+			string path = Path.Combine(Path.GetTempPath(), "ateo-secret-" + Guid.NewGuid().ToString("N"));
+			File.WriteAllBytes(path, value.FileBytes ?? Array.Empty<byte>());
+			_materializedSecretFiles[logicalKey] = path;
+			return path;
+		}
+
+		#endregion
+
+		#region Private Methods
+
+		private SecretValue RequireSecret(string logicalKey)
+		{
+			if (Secrets != null && Secrets.TryGetValue(logicalKey, out SecretValue value) && value != null) return value;
+
+			throw new Exception("Secret '" + logicalKey + "' was not resolved for this build.");
+		}
 
 		#endregion
 	}
