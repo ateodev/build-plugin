@@ -30,3 +30,7 @@
 *.unitypackage
 .DS_Store
 Thumbs.db
+
+# Odin Inspector — licensed paid asset; local dev dependency only, NEVER published
+/Assets/Plugins/Sirenix/
+/Assets/Plugins/Sirenix.meta
