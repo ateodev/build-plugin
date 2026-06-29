@@ -20,6 +20,11 @@ namespace Ateo.Build
 		public string Agent;              // running agent name (null while queued)
 		public int QueuePosition;         // 1-based position while queued (0 when not applicable)
 
+		// Build identity (§12.2), recorded by BuildRunner via unitybuild.version.* - drives the on-disk download
+		// folder + local/server correlation. Null/0 for builds that predate identity recording.
+		public string VersionName;        // unitybuild.version.name resulting property
+		public int VersionCode;           // unitybuild.version.code resulting property
+
 		#endregion
 
 		#region Properties

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -363,9 +364,11 @@ namespace Ateo.Build
 		private async Task LoadBuildsAsync(BuildPanel owner)
 		{
 			List<BuildRow> rows = new List<BuildRow>();
-			Dictionary<long, BuildRow> byServerId = new Dictionary<long, BuildRow>();
 
-			// Server builds (filtered by game + definition's executor) - live rows first.
+			// Server builds keyed by their §12.2 identity folder, so a local copy at the same path folds in
+			// (one row per build) instead of appearing twice.
+			Dictionary<string, BuildRow> byFolder = new Dictionary<string, BuildRow>(StringComparer.OrdinalIgnoreCase);
+
 			if (!string.IsNullOrEmpty(owner.Token))
 			{
 				if (owner.Executors == null || owner.Executors.Count == 0) await owner.DiscoverExecutorsAsync();
@@ -388,26 +391,27 @@ namespace Ateo.Build
 								OnServer = true,
 								ServerId = build.Id,
 								WebUrl = build.WebUrl,
-								Live = build.IsQueued || build.IsRunning
+								Live = build.IsQueued || build.IsRunning,
+								Number = build.Number,
+								VersionName = build.VersionName,
+								VersionCode = build.VersionCode
 							};
 							rows.Add(row);
-							byServerId[build.Id] = row;
+							byFolder[FolderNameFor(row)] = row;
 						}
 					}
 				}
 			}
 
-			// On-disk builds (Builds/<definition>/...). A "server_<id>" folder is a downloaded server build:
-			// fold it into that server row (one entry per build) instead of listing it twice.
-			string dir = Path.Combine(BuildPanel.ProjectRoot, "Builds", _definition.DefinitionName);
+			// On-disk builds (Builds/<definition>/<version>[_<buildNumber>]/, or a "b<number>" fallback folder for
+			// pre-identity downloads). A folder that matches a server build's identity folds into that row.
+			string dir = BuildLayout.DefinitionDirectory(BuildPanel.ProjectRoot, _definition);
 			if (Directory.Exists(dir))
 			{
 				foreach (string sub in Directory.GetDirectories(dir))
 				{
 					string name = Path.GetFileName(sub);
-					if (name.StartsWith("server_", StringComparison.Ordinal) &&
-						long.TryParse(name.Substring("server_".Length), out long serverId) &&
-						byServerId.TryGetValue(serverId, out BuildRow existing))
+					if (byFolder.TryGetValue(name, out BuildRow existing))
 					{
 						existing.LocalPresent = true;
 						existing.LocalPath = sub;
@@ -427,6 +431,18 @@ namespace Ateo.Build
 			_builds = rows;
 		}
 
+		/// <summary>
+		/// The §12.2 identity folder name for a build row: its version (<c>&lt;version&gt;</c> /
+		/// <c>&lt;version&gt;_&lt;code&gt;</c>) when the server recorded it, else a <c>b&lt;number&gt;</c> fallback
+		/// for builds that predate identity recording. Used for both the download destination and correlation.
+		/// </summary>
+		private string FolderNameFor(BuildRow row)
+		{
+			return !string.IsNullOrEmpty(row.VersionName)
+				? BuildLayout.FolderName(_definition, row.VersionName, row.VersionCode)
+				: "b" + row.Number;
+		}
+
 		private void DownloadBuild(BuildRow row)
 		{
 			_owner.RunAsync(DownloadBuildAsync(row));
@@ -434,17 +450,52 @@ namespace Ateo.Build
 
 		private async Task DownloadBuildAsync(BuildRow row)
 		{
+			string destDir = Path.Combine(BuildLayout.DefinitionDirectory(BuildPanel.ProjectRoot, _definition), FolderNameFor(row));
+
 			using (TeamCityClient client = _owner.NewClient())
 			{
 				List<ArtifactFile> files = await client.ListArtifactsAsync(row.ServerId);
-				string destDir = Path.Combine(BuildPanel.ProjectRoot, "Builds", _definition.DefinitionName, "server_" + row.ServerId);
+				Directory.CreateDirectory(destDir);
+
 				foreach (ArtifactFile file in files)
 				{
-					await client.DownloadArtifactAsync(row.ServerId, file.Name, Path.Combine(destDir, file.Name));
+					string local = Path.Combine(destDir, file.Name);
+					await client.DownloadArtifactAsync(row.ServerId, file.Name, local);
+
+					// "Download = fetch + unarchive" (§12.2): expand the build archive in place so a downloaded
+					// build is byte-identical on disk to a locally-produced one, then drop the archive.
+					if (file.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+					{
+						ExtractZip(local, destDir);
+						File.Delete(local);
+					}
 				}
 
-				_owner.SetStatus("Downloaded " + files.Count + " artifact(s) -> " + destDir);
+				_owner.SetStatus("Downloaded build #" + row.Number + " -> " + destDir);
 				Refresh(_owner);
+			}
+		}
+
+		/// <summary>Extract a zip into <paramref name="destDir"/>, overwriting, with a zip-slip guard.</summary>
+		private static void ExtractZip(string zipPath, string destDir)
+		{
+			string root = Path.GetFullPath(destDir);
+			using (ZipArchive archive = ZipFile.OpenRead(zipPath))
+			{
+				foreach (ZipArchiveEntry entry in archive.Entries)
+				{
+					string target = Path.GetFullPath(Path.Combine(destDir, entry.FullName));
+					if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) continue; // zip-slip guard
+
+					if (string.IsNullOrEmpty(entry.Name))
+					{
+						Directory.CreateDirectory(target); // directory entry
+						continue;
+					}
+
+					Directory.CreateDirectory(Path.GetDirectoryName(target));
+					entry.ExtractToFile(target, true);
+				}
 			}
 		}
 

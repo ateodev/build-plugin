@@ -453,6 +453,11 @@ namespace Ateo.Build
 		public string WebUrl;
 		public bool Live;
 
+		// Identity (§12.2) - drives the shared on-disk folder for downloads and local/server correlation.
+		public string Number;
+		public string VersionName;
+		public int VersionCode;
+
 		#endregion
 	}
 }

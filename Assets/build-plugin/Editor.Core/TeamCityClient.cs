@@ -74,7 +74,8 @@ namespace Ateo.Build
 			locator += ",count:" + count;
 
 			string json = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(locator) +
-				"&fields=build(id,number,state,status,statusText,percentageComplete,webUrl)");
+				"&fields=build(id,number,state,status,statusText,percentageComplete,webUrl," +
+				"resultingProperties($locator(name:(value:unitybuild.version.,matchType:starts-with)),property(name,value)))");
 			BuildListDto list = JsonUtility.FromJson<BuildListDto>(json);
 
 			List<BuildStatus> result = new List<BuildStatus>();
@@ -252,23 +253,30 @@ namespace Ateo.Build
 				WebUrl = dto.webUrl,
 				BuildTypeId = dto.buildTypeId,
 				Agent = dto.agent != null ? dto.agent.name : null,
-				Game = FindProperty(dto, "unitybuild.game"),
-				Definition = FindProperty(dto, "unitybuild.definition")
+				Game = FindProperty(dto.properties, "unitybuild.game"),
+				Definition = FindProperty(dto.properties, "unitybuild.definition"),
+				VersionName = FindProperty(dto.resultingProperties, "unitybuild.version.name"),
+				VersionCode = ParseInt(FindProperty(dto.resultingProperties, "unitybuild.version.code"))
 			};
 
 			return status;
 		}
 
-		private static string FindProperty(BuildDto dto, string name)
+		private static string FindProperty(PropertiesDto properties, string name)
 		{
-			if (dto == null || dto.properties == null || dto.properties.property == null) return null;
+			if (properties == null || properties.property == null) return null;
 
-			foreach (PropertyDto property in dto.properties.property)
+			foreach (PropertyDto property in properties.property)
 			{
 				if (property != null && property.name == name) return property.value;
 			}
 
 			return null;
+		}
+
+		private static int ParseInt(string value)
+		{
+			return int.TryParse(value, out int parsed) ? parsed : 0;
 		}
 
 		private static PropertiesDto ToProperties(IReadOnlyDictionary<string, string> properties)
@@ -299,7 +307,7 @@ namespace Ateo.Build
 		[Serializable] private sealed class BuildTypeRef { public string id; }
 		[Serializable] private sealed class PropertiesDto { public PropertyDto[] property; }
 		[Serializable] private sealed class PropertyDto { public string name; public string value; }
-		[Serializable] private sealed class BuildDto { public long id; public string number; public string state; public string status; public string statusText; public int percentageComplete; public string webUrl; public string buildTypeId; public AgentDto agent; public PropertiesDto properties; }
+		[Serializable] private sealed class BuildDto { public long id; public string number; public string state; public string status; public string statusText; public int percentageComplete; public string webUrl; public string buildTypeId; public AgentDto agent; public PropertiesDto properties; public PropertiesDto resultingProperties; }
 		[Serializable] private sealed class AgentDto { public string name; }
 		[Serializable] private sealed class BuildListDto { public BuildDto[] build; }
 		[Serializable] private sealed class ArtifactFileDto { public string name; public long size; public HrefDto content; }

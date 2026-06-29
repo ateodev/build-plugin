@@ -91,6 +91,10 @@ namespace Ateo.Build
 				// 3. Version stamp (incl. BUILD_VERSION_NAME / ANDROID_VERSION_CODE / IOS_BUILD_NUMBER).
 				VersionStamp.Apply(context);
 
+				// Record the resolved identity on the build so the panel can place a download in the same §12.2
+				// folder and fold the server build + local copy into one history row.
+				EmitBuildIdentity(context);
+
 				// 4. Android signing from env references (passwords resolved agent-side, never in the asset).
 				ApplyAndroidSigning(definition, context);
 
@@ -608,6 +612,22 @@ namespace Ateo.Build
 			};
 		}
 
+		/// <summary>
+		/// Publishes the build's resolved version + build number as TeamCity build parameters
+		/// (<c>unitybuild.version.name</c> / <c>unitybuild.version.code</c>) via service messages, so a finished
+		/// server build carries its identity in <c>resultingProperties</c>. The panel reads these to download into
+		/// the matching §12.2 folder. No-op outside batch mode (local builds already know their identity).
+		/// </summary>
+		private static void EmitBuildIdentity(BuildContext context)
+		{
+			if (!context.IsBatchMode) return;
+
+			Console.WriteLine("##teamcity[setParameter name='unitybuild.version.name' value='" +
+				EscapeTeamCity(context.VersionName) + "']");
+			Console.WriteLine("##teamcity[setParameter name='unitybuild.version.code' value='" +
+				EscapeTeamCity(context.VersionCode.ToString()) + "']");
+		}
+
 		/// <summary>Escapes a string for a TeamCity service-message value (| ' [ ] and newlines).</summary>
 		private static string EscapeTeamCity(string value)
 		{
@@ -742,8 +762,9 @@ namespace Ateo.Build
 					.Replace("{version}", context.VersionName)
 					.Replace("{code}", context.VersionCode.ToString());
 
-			// Output under the checkout's Builds/Output/<Platform>/ staging (matches the server's artifact rules).
-			string directory = Path.Combine(CheckoutRoot(), "Builds", "Output", definition.Platform.ToServerToken());
+			// The one shared §12.2 layout: Builds/<definition>/<version>[_<buildNumber>]/. Identical for local
+			// output and unarchived downloads, so a download lands byte-identical in the same folder.
+			string directory = BuildLayout.BuildDirectory(CheckoutRoot(), definition, context.VersionName, context.VersionCode);
 			Directory.CreateDirectory(directory);
 			return Path.Combine(directory, fileName + extension);
 		}
