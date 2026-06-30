@@ -174,7 +174,6 @@ namespace Ateo.Build
 					UseShellExecute = false,
 					RedirectStandardOutput = true,
 					RedirectStandardError = true,
-					RedirectStandardInput = true, // own stdin, closed below - a no-session prompt can't hang the caller
 					CreateNoWindow = true
 				};
 
@@ -189,8 +188,9 @@ namespace Ateo.Build
 						throw new Exception("Failed to launch op CLI ('" + startInfo.FileName + "'): " + exception.Message, exception);
 					}
 
-					process.StandardInput.Close(); // op never reads stdin; closing it guarantees no prompt can hang us
-
+					// NOTE: do NOT redirect/close stdin here - 'op item create' treats a redirected stdin as a piped
+					// JSON template and fails ("invalid JSON in piped input"). op fails fast without a session anyway,
+					// and the WaitForExit timeout below is the hang backstop.
 					// Drain stdout as raw bytes (documents may be binary) and stderr as text, concurrently.
 					MemoryStream stdOut = new MemoryStream();
 					Task copyOut = process.StandardOutput.BaseStream.CopyToAsync(stdOut);
