@@ -71,7 +71,8 @@ namespace Ateo.Build
 			{
 				Definition = definition,
 				Project = FindProjectConfig(),
-				IsBatchMode = Application.isBatchMode
+				IsBatchMode = Application.isBatchMode,
+				BuildName = Environment.GetEnvironmentVariable("BUILD_NAME")
 			};
 
 			Debug.Log("[Build] definition='" + definition.DefinitionName + "' platform=" + definition.Platform +
@@ -118,6 +119,8 @@ namespace Ateo.Build
 					result = BuildResult.Failed(definition.DefinitionName, exception.ToString());
 					Debug.LogError("[Build] build step threw: " + exception);
 				}
+
+				result.BuildName = context.BuildName; // carry identity into the result JSON the wrapper reads
 
 				// 8. Post-build action pipeline (v2 typed contract, §10) - runs the definition's ordered
 				//    PostBuildActions on the just-built artifact BEFORE the result is finalized/written. Only
@@ -626,6 +629,11 @@ namespace Ateo.Build
 				EscapeTeamCity(context.VersionName) + "']");
 			Console.WriteLine("##teamcity[setParameter name='unitybuild.version.code' value='" +
 				EscapeTeamCity(context.VersionCode.ToString()) + "']");
+			if (!string.IsNullOrEmpty(context.BuildName))
+			{
+				Console.WriteLine("##teamcity[setParameter name='unitybuild.buildName' value='" +
+					EscapeTeamCity(context.BuildName) + "']");
+			}
 		}
 
 		/// <summary>Escapes a string for a TeamCity service-message value (| ' [ ] and newlines).</summary>
@@ -764,7 +772,7 @@ namespace Ateo.Build
 
 			// The one shared §12.2 layout: Builds/<definition>/<version>[_<buildNumber>]/. Identical for local
 			// output and unarchived downloads, so a download lands byte-identical in the same folder.
-			string directory = BuildLayout.BuildDirectory(CheckoutRoot(), definition, context.VersionName, context.VersionCode);
+			string directory = BuildLayout.BuildDirectory(CheckoutRoot(), definition, context.VersionName, context.VersionCode, context.BuildName);
 			Directory.CreateDirectory(directory);
 			return Path.Combine(directory, fileName + extension);
 		}

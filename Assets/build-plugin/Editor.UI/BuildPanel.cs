@@ -457,6 +457,7 @@ namespace Ateo.Build
 		public string Number;
 		public string VersionName;
 		public int VersionCode;
+		public string BuildName;
 
 		#endregion
 	}

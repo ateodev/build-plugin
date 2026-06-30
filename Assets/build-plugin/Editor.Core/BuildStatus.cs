@@ -24,6 +24,7 @@ namespace Ateo.Build
 		// folder + local/server correlation. Null/0 for builds that predate identity recording.
 		public string VersionName;        // unitybuild.version.name resulting property
 		public int VersionCode;           // unitybuild.version.code resulting property
+		public string BuildName;          // unitybuild.buildName resulting property (optional, raw)
 
 		#endregion
 

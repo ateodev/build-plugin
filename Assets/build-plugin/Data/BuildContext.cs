@@ -29,6 +29,9 @@ namespace Ateo.Build
 		/// <summary>Version/build code stamped for this build.</summary>
 		public int VersionCode;
 
+		/// <summary>Optional free-text build-name suffix (§12.2) - distinguishes builds at the same version on disk. Raw (unsanitized); <see cref="BuildLayout"/> sanitizes it identically on both producer and panel.</summary>
+		public string BuildName;
+
 		/// <summary>Absolute path to the build folder the post-build pipeline operates within.</summary>
 		public string BuildFolder;
 

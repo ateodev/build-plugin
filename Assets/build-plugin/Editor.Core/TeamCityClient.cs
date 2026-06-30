@@ -75,7 +75,7 @@ namespace Ateo.Build
 
 			string json = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(locator) +
 				"&fields=build(id,number,state,status,statusText,percentageComplete,webUrl," +
-				"resultingProperties($locator(name:(value:unitybuild.version.,matchType:starts-with)),property(name,value)))");
+				"resultingProperties($locator(name:(value:unitybuild.,matchType:starts-with)),property(name,value)))");
 			BuildListDto list = JsonUtility.FromJson<BuildListDto>(json);
 
 			List<BuildStatus> result = new List<BuildStatus>();
@@ -262,7 +262,8 @@ namespace Ateo.Build
 				Game = FindProperty(dto.properties, "unitybuild.game"),
 				Definition = FindProperty(dto.properties, "unitybuild.definition"),
 				VersionName = FindProperty(dto.resultingProperties, "unitybuild.version.name"),
-				VersionCode = ParseInt(FindProperty(dto.resultingProperties, "unitybuild.version.code"))
+				VersionCode = ParseInt(FindProperty(dto.resultingProperties, "unitybuild.version.code")),
+				BuildName = FindProperty(dto.resultingProperties, "unitybuild.buildName")
 			};
 
 			return status;

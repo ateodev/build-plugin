@@ -39,6 +39,7 @@ namespace Ateo.Build
 
 		private string _versionOverride = "";
 		private string _changeset = "";
+		private string _buildName = "";
 
 		private List<BuildRow> _builds = new List<BuildRow>();
 		private bool _loading;
@@ -55,7 +56,12 @@ namespace Ateo.Build
 		{
 			_definition = definition;
 			_owner = owner;
+			_buildName = EditorPrefs.GetString(BuildNamePrefKey, ""); // per-definition, machine-local, never committed
 		}
+
+		// Build-name field persists its last value per definition in EditorPrefs (a per-trigger convenience), so
+		// bumping "-4" -> "-5" survives reselect/reload but never touches the committed asset.
+		private string BuildNamePrefKey => "Ateo.Build.BuildName." + _definition.DefinitionName;
 
 		#endregion
 
@@ -166,10 +172,12 @@ namespace Ateo.Build
 			GUI.Label(new Rect(right - sourceW, rect.y, sourceW, rect.height), sourceContent, RightMini);
 			right = right - sourceW - pad;
 
-			// Title + detail fill what remains (truncating before the buttons).
-			float titleW = 56f;
+			// Title (build identity) + detail fill what remains (truncating before the buttons). The identity can be
+			// long (1.0-test-locomotion-4), so give it a wider column and a tooltip with the full string.
+			float titleW = Mathf.Min(160f, Mathf.Max(56f, (right - rect.x) * 0.55f));
 			Rect titleRect = new Rect(rect.x + pad, rect.y, titleW, rect.height);
-			GUI.Label(titleRect, (row.Live ? "● " : "") + row.Title, row.Live ? EditorStyles.boldLabel : EditorStyles.label);
+			GUI.Label(titleRect, new GUIContent((row.Live ? "● " : "") + row.Title, row.Title),
+				row.Live ? EditorStyles.boldLabel : EditorStyles.label);
 
 			float detailW = Mathf.Max(0f, right - titleRect.xMax - pad);
 			GUI.Label(new Rect(titleRect.xMax + pad, rect.y, detailW, rect.height),
@@ -191,6 +199,17 @@ namespace Ateo.Build
 					new GUIContent("Version name", "Override marketing version (unitybuild.version.name). " +
 						"No-op until the BUILD_VERSION_NAME task lands (§15) - empty = committed PlayerSettings value."),
 					_versionOverride);
+
+				string newBuildName = EditorGUILayout.TextField(
+					new GUIContent("Build name (optional)", "Free-text label appended to this build's on-disk identity " +
+						"(e.g. 1.0-test-locomotion-4), so you can take many builds at the same version without overwriting. " +
+						"Applies to both local and server builds. Sanitized to filesystem-safe characters (whitespace -> '-')."),
+					_buildName);
+				if (newBuildName != _buildName)
+				{
+					_buildName = newBuildName;
+					EditorPrefs.SetString(BuildNamePrefKey, _buildName ?? "");
+				}
 
 				using (new EditorGUILayout.HorizontalScope())
 				{
@@ -386,7 +405,7 @@ namespace Ateo.Build
 
 							BuildRow row = new BuildRow
 							{
-								Title = "#" + build.Number,
+								Title = IdentityLabel(build),
 								Detail = DescribeState(build),
 								OnServer = true,
 								ServerId = build.Id,
@@ -394,7 +413,8 @@ namespace Ateo.Build
 								Live = build.IsQueued || build.IsRunning,
 								Number = build.Number,
 								VersionName = build.VersionName,
-								VersionCode = build.VersionCode
+								VersionCode = build.VersionCode,
+								BuildName = build.BuildName
 							};
 							rows.Add(row);
 							byFolder[FolderNameFor(row)] = row;
@@ -432,15 +452,26 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The §12.2 identity folder name for a build row: its version (<c>&lt;version&gt;</c> /
-		/// <c>&lt;version&gt;_&lt;code&gt;</c>) when the server recorded it, else a <c>b&lt;number&gt;</c> fallback
-		/// for builds that predate identity recording. Used for both the download destination and correlation.
+		/// The §12.2 identity folder name for a build row: <c>&lt;version&gt;[_&lt;code&gt;][-&lt;buildName&gt;]</c>
+		/// when the server recorded its identity, else a <c>b&lt;number&gt;</c> fallback for builds that predate
+		/// identity recording. Used for both the download destination and the local/server correlation key.
 		/// </summary>
 		private string FolderNameFor(BuildRow row)
 		{
 			return !string.IsNullOrEmpty(row.VersionName)
-				? BuildLayout.FolderName(_definition, row.VersionName, row.VersionCode)
+				? BuildLayout.FolderName(_definition, row.VersionName, row.VersionCode, row.BuildName)
 				: "b" + row.Number;
+		}
+
+		/// <summary>
+		/// The list label for a server build: its identity (<c>1.0</c> / <c>1.0-test-locomotion-4</c>) when recorded,
+		/// else the TeamCity <c>#number</c> for builds that never recorded one (failed-early / pre-identity).
+		/// </summary>
+		private string IdentityLabel(BuildStatus build)
+		{
+			return !string.IsNullOrEmpty(build.VersionName)
+				? BuildLayout.FolderName(_definition, build.VersionName, build.VersionCode, build.BuildName)
+				: "#" + build.Number;
 		}
 
 		private void DownloadBuild(BuildRow row)
@@ -531,6 +562,7 @@ namespace Ateo.Build
 			if (_definition.Profile != null) properties["unitybuild.buildProfile"] = AssetDatabase.GetAssetPath(_definition.Profile);
 #endif
 			if (!string.IsNullOrEmpty(_versionOverride)) properties["unitybuild.version.name"] = _versionOverride;
+			if (!string.IsNullOrEmpty(_buildName)) properties["unitybuild.buildName"] = _buildName;
 			if (!string.IsNullOrEmpty(_changeset))
 			{
 				properties["unitybuild.vcs.ref"] = _changeset;
@@ -551,10 +583,12 @@ namespace Ateo.Build
 		private void BuildLocal()
 		{
 			string skip = SkipSet();
-			string previous = Environment.GetEnvironmentVariable("BUILD_ACTIONS_SKIP");
+			string previousSkip = Environment.GetEnvironmentVariable("BUILD_ACTIONS_SKIP");
+			string previousName = Environment.GetEnvironmentVariable("BUILD_NAME");
 			try
 			{
 				Environment.SetEnvironmentVariable("BUILD_ACTIONS_SKIP", skip);
+				Environment.SetEnvironmentVariable("BUILD_NAME", _buildName); // BuildRunner reads this into the §12.2 folder
 				BuildResult result = BuildRunner.RunDefinition(_definition);
 				_localStatus = (result.Success ? "Local build OK: " + result.ArtifactPath : "Local build FAILED: " + result.Error);
 			}
@@ -564,7 +598,8 @@ namespace Ateo.Build
 			}
 			finally
 			{
-				Environment.SetEnvironmentVariable("BUILD_ACTIONS_SKIP", previous);
+				Environment.SetEnvironmentVariable("BUILD_ACTIONS_SKIP", previousSkip);
+				Environment.SetEnvironmentVariable("BUILD_NAME", previousName);
 				Refresh(_owner);
 			}
 		}

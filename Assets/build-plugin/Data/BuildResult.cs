@@ -33,6 +33,7 @@ namespace Ateo.Build
 		public string ArtifactPath;      // absolute path to the produced artifact (empty on failure)
 		public string VersionName;       // marketing version actually stamped
 		public int VersionCode;          // version/build code actually stamped
+		public string BuildName;         // optional free-text build-name suffix (§12.2), raw/unsanitized
 		public long DurationSeconds;
 		public string Error;             // populated on failure
 
