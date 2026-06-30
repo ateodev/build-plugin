@@ -27,6 +27,11 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Unique name. Passed as the unitybuild.definition build parameter and used to locate this asset.")]
 		private string _definitionName;
 
+		[SerializeField, Tooltip("Override the Unity editor version for THIS definition only (e.g. \"6000.0.58f2\"). " +
+			"Wins over the Project Config's Unity Version and ProjectSettings/ProjectVersion.txt. Empty = inherit those. " +
+			"Use when one definition must target a different editor than the rest of the project.")]
+		private string _unityVersion;
+
 #if UNITY_6000_0_OR_NEWER
 		[SerializeField, Tooltip("Unity 6 Build Profile to build (preferred). If set, platform/scenes/defines/player-settings come from it.")]
 		private BuildProfile _buildProfile;
@@ -70,6 +75,9 @@ namespace Ateo.Build
 		#region Properties
 
 		public string DefinitionName => _definitionName;
+
+		/// <summary>Per-definition Unity editor version override; empty = inherit Project Config / ProjectVersion.txt.</summary>
+		public string UnityVersion => _unityVersion;
 #if UNITY_6000_0_OR_NEWER
 		public BuildProfile Profile => _buildProfile;
 #endif
