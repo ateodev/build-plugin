@@ -74,9 +74,9 @@ namespace Ateo.Build
 			SirenixEditorGUI.BeginBox();
 			using (new EditorGUILayout.HorizontalScope())
 			{
-				string game = string.IsNullOrEmpty(build.Game) ? "?" : build.Game;
+				string project = string.IsNullOrEmpty(build.Project) ? "?" : build.Project;
 				string definition = string.IsNullOrEmpty(build.Definition) ? "?" : build.Definition;
-				EditorGUILayout.LabelField(game + " · " + definition, EditorStyles.boldLabel, GUILayout.Width(220));
+				EditorGUILayout.LabelField(project + " · " + definition, EditorStyles.boldLabel, GUILayout.Width(220));
 				EditorGUILayout.LabelField(Describe(build), EditorStyles.miniLabel);
 
 				GUILayout.FlexibleSpace();
@@ -86,9 +86,9 @@ namespace Ateo.Build
 					Application.OpenURL(_owner.ResolveServerLink(build.WebUrl));
 				}
 
-				bool isThisGame = _owner.Project != null && build.Definition != null &&
-					(string.IsNullOrEmpty(build.Game) || build.Game == _owner.Project.GameToken);
-				if (isThisGame && GUILayout.Button("Jump", GUILayout.Width(50)))
+				bool isThisProject = _owner.Project != null && build.Definition != null &&
+					(string.IsNullOrEmpty(build.Project) || build.Project == _owner.Project.ProjectKey);
+				if (isThisProject && GUILayout.Button("Jump", GUILayout.Width(50)))
 				{
 					_owner.SelectDefinitionByName(build.Definition);
 				}

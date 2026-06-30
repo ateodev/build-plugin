@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Ateo.Build
 {
@@ -14,16 +15,16 @@ namespace Ateo.Build
 	/// Project-wide build configuration: settings shared by every <see cref="BuildDefinition"/> in this
 	/// project. Committed under Assets/BuildConfigs/. Holds NON-SECRET, project-level facts only. The
 	/// authoritative repo URL + credentials live agent-side on the build server (fixed at onboarding, keyed
-	/// by the game token); the values here are for the plugin's local use, the panel, and human reference.
+	/// by the project key); the values here are for the plugin's local use, the panel, and human reference.
 	/// </summary>
 	[CreateAssetMenu(menuName = "Build/Project Config", fileName = "BuildProjectConfig", order = 1)]
 	public sealed class ProjectConfig : ScriptableObject
 	{
 		#region Fields
 
-		[SerializeField, Tooltip("Game token - the JOIN KEY. Must equal the build server's agent-side record " +
-			"token; the server resolves repo, credentials, signing secrets, license and checkout dir from it.")]
-		private string _gameToken;
+		[SerializeField, FormerlySerializedAs("_gameToken"), Tooltip("Project key - the JOIN KEY (lowercase, a-z 0-9 and '-'). " +
+			"The server resolves repo, credentials, signing secrets, license and checkout dir from it via the provider.")]
+		private string _projectKey;
 
 		[SerializeField, Tooltip("How the project's source is version-controlled (reference; the authoritative copy is agent-side).")]
 		private VcsKind _vcs = VcsKind.Git;
@@ -70,7 +71,7 @@ namespace Ateo.Build
 
 		#region Properties
 
-		public string GameToken => _gameToken;
+		public string ProjectKey => _projectKey;
 		public VcsKind Vcs => _vcs;
 		public string RepoUrl => _repoUrl;
 		public string TeamId => _teamId;

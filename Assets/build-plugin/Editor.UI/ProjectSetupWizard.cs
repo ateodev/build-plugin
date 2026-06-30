@@ -13,9 +13,9 @@ namespace Ateo.Build
 {
 	/// <summary>
 	/// The first-run project-setup wizard (§13.2), a floating <see cref="OdinEditorWindow"/> the Build Panel
-	/// offers when no <see cref="ProjectConfig"/> asset exists. Heavy on auto-detection (game slug from the
-	/// product name, repo URL from <c>git remote</c>, Unity version from the editor), it gathers the per-game
-	/// onboarding facts - slug, team, server URL, secrets-provider config, VCS + a reusable checkout credential
+	/// offers when no <see cref="ProjectConfig"/> asset exists. Heavy on auto-detection (project key from the
+	/// product name, repo URL from <c>git remote</c>, Unity version from the editor), it gathers the per-project
+	/// onboarding facts - project key, team, server URL, secrets-provider config, VCS + a reusable checkout credential
 	/// (the credential registry §13.3), Slack channel, Unity license (§13.4) - then <c>Validate</c>s the server
 	/// connection + provider auth and writes <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing
 	/// lives in the Settings view.
@@ -50,10 +50,10 @@ namespace Ateo.Build
 		// --- Identity -----------------------------------------------------------------------------------------
 
 		[BoxGroup("Project"), PropertyOrder(0)]
-		[InfoBox("Give this slug to your build admin - the build server's agent-side record must use the same string " +
-			"(it's the join key that resolves repo, credentials, signing and license).", InfoMessageType.Info)]
-		[SerializeField, LabelText("Game slug"), Tooltip("Unique game token. Suggested from the product name; editable.")]
-		private string _gameSlug = "";
+		[InfoBox("The join key (lowercase a-z 0-9 and '-'). Onboarding writes the vcs-<project-key> record + credential to " +
+			"your secret provider, so the build server resolves repo, credentials, signing and license from it - no admin step.", InfoMessageType.Info)]
+		[SerializeField, LabelText("Project key"), Tooltip("Unique project key - lowercase, a-z 0-9 and '-' only. Suggested from the product name; editable.")]
+		private string _projectKey = "";
 
 		[BoxGroup("Project"), PropertyOrder(1)]
 		[SerializeField, Tooltip("Trust-boundary team this project belongs to (resolves the TeamCity subtree/executors).")]
@@ -267,11 +267,13 @@ namespace Ateo.Build
 		[Button("Create ProjectConfig", ButtonSizes.Large)]
 		private void Create()
 		{
-			if (string.IsNullOrWhiteSpace(_gameSlug))
+			if (string.IsNullOrWhiteSpace(_projectKey))
 			{
-				_validation = "Enter a game slug.";
+				_validation = "Enter a project key.";
 				return;
 			}
+
+			_projectKey = ToProjectKey(_projectKey); // enforce the lowercase [a-z0-9-] format on hand-typed input
 
 			EnsureBuildConfigsFolder();
 			const string assetPath = "Assets/BuildConfigs/ProjectConfig.asset";
@@ -294,7 +296,7 @@ namespace Ateo.Build
 
 			if (_owner != null) _owner.RefreshProject();
 
-			Debug.Log("[Project Setup] Created " + assetPath + " for slug '" + _gameSlug + "'.");
+			Debug.Log("[Project Setup] Created " + assetPath + " for project '" + _projectKey + "'.");
 			Close();
 		}
 
@@ -356,7 +358,7 @@ namespace Ateo.Build
 
 		private void AutoDetect()
 		{
-			if (string.IsNullOrEmpty(_gameSlug)) _gameSlug = Slugify(Application.productName);
+			if (string.IsNullOrEmpty(_projectKey)) _projectKey = ToProjectKey(Application.productName);
 			if (string.IsNullOrEmpty(_unityVersion)) _unityVersion = Application.unityVersion;
 			DetectGitRemote();
 			RefreshLicenses();
@@ -426,7 +428,7 @@ namespace Ateo.Build
 
 		private void ApplyFields(ProjectConfig project)
 		{
-			SetField(project, "_gameToken", _gameSlug);
+			SetField(project, "_projectKey", _projectKey);
 			SetField(project, "_teamId", _teamId);
 			SetField(project, "_serverBaseUrl", _serverBaseUrl);
 			SetField(project, "_slackChannelId", _slackChannelId);
@@ -510,7 +512,7 @@ namespace Ateo.Build
 		private void WriteVcsRecord()
 		{
 			ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
-			string item = "vcs-" + _gameSlug;
+			string item = "vcs-" + _projectKey;
 			if (provider == null)
 			{
 				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; create the '" + item + "' record manually (TODO).");
@@ -574,18 +576,21 @@ namespace Ateo.Build
 			}
 		}
 
-		private static string Slugify(string value)
+		/// <summary>Normalize free text to a valid project key: lowercase ASCII <c>[a-z0-9-]</c>, '-' the only separator, collapsed + trimmed (§11.7).</summary>
+		private static string ToProjectKey(string value)
 		{
 			if (string.IsNullOrEmpty(value)) return "";
 
 			System.Text.StringBuilder builder = new System.Text.StringBuilder(value.Length);
 			foreach (char c in value)
 			{
-				if (char.IsLetterOrDigit(c)) builder.Append(char.ToLowerInvariant(c));
-				else if (c == ' ' || c == '_' || c == '-') builder.Append('-');
+				char lower = char.ToLowerInvariant(c);
+				builder.Append((lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9') ? lower : '-');
 			}
 
-			return builder.ToString().Trim('-');
+			string result = builder.ToString();
+			while (result.Contains("--")) result = result.Replace("--", "-");
+			return result.Trim('-');
 		}
 
 		private static string Quote(string value)

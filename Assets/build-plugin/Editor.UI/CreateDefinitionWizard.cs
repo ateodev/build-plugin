@@ -275,9 +275,9 @@ namespace Ateo.Build
 			bool generated = GenerateKeystore(keystorePath);
 
 			ProjectConfig project = _owner != null ? _owner.Project : null;
-			string game = project != null ? project.GameToken : "game";
+			string projectKey = project != null ? project.ProjectKey : "project";
 			ISecretProvider provider = SecretProviders.ForProject(project);
-			string item = game + "-android-signing";
+			string item = projectKey + "-android-signing";
 
 			if (generated)
 			{

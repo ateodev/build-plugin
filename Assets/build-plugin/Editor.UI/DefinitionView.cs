@@ -393,12 +393,12 @@ namespace Ateo.Build
 				if (owner.Executors == null || owner.Executors.Count == 0) await owner.DiscoverExecutorsAsync();
 
 				string executor = owner.ResolveExecutor(_definition);
-				string game = owner.Project != null ? owner.Project.GameToken : null;
+				string projectKey = owner.Project != null ? owner.Project.ProjectKey : null;
 				if (!string.IsNullOrEmpty(executor))
 				{
 					using (TeamCityClient client = owner.NewClient())
 					{
-						List<BuildStatus> builds = await client.ListBuildsAsync(executor, game, 10);
+						List<BuildStatus> builds = await client.ListBuildsAsync(executor, projectKey, 10);
 						foreach (BuildStatus build in builds)
 						{
 							if (build.Definition != null && build.Definition != _definition.DefinitionName) continue;
@@ -554,7 +554,7 @@ namespace Ateo.Build
 
 			Dictionary<string, string> properties = new Dictionary<string, string>
 			{
-				{ "unitybuild.game", _owner.Project != null ? _owner.Project.GameToken : "" },
+				{ "unitybuild.project", _owner.Project != null ? _owner.Project.ProjectKey : "" },
 				{ "unitybuild.definition", _definition.DefinitionName }
 			};
 

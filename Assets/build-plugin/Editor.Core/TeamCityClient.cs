@@ -66,11 +66,11 @@ namespace Ateo.Build
 			return ToStatus(JsonUtility.FromJson<BuildDto>(json));
 		}
 
-		/// <summary>Recent builds of <paramref name="buildTypeId"/>, optionally filtered to one game token.</summary>
-		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string gameToken, int count = 20)
+		/// <summary>Recent builds of <paramref name="buildTypeId"/>, optionally filtered to one project key.</summary>
+		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string projectKey, int count = 20)
 		{
 			string locator = "buildType:(id:" + buildTypeId + ")";
-			if (!string.IsNullOrEmpty(gameToken)) locator += ",property:(name:unitybuild.game,value:" + gameToken + ")";
+			if (!string.IsNullOrEmpty(projectKey)) locator += ",property:(name:unitybuild.project,value:" + projectKey + ")";
 			locator += ",count:" + count;
 
 			string json = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(locator) +
@@ -259,7 +259,7 @@ namespace Ateo.Build
 				WebUrl = dto.webUrl,
 				BuildTypeId = dto.buildTypeId,
 				Agent = dto.agent != null ? dto.agent.name : null,
-				Game = FindProperty(dto.properties, "unitybuild.game"),
+				Project = FindProperty(dto.properties, "unitybuild.project"),
 				Definition = FindProperty(dto.properties, "unitybuild.definition"),
 				VersionName = FindProperty(dto.resultingProperties, "unitybuild.version.name"),
 				VersionCode = ParseInt(FindProperty(dto.resultingProperties, "unitybuild.version.code")),

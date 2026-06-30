@@ -14,7 +14,7 @@ namespace Ateo.Build
 		public string WebUrl;
 
 		// Populated for the Activity / in-flight views from the build's unitybuild.* properties + REST attributes.
-		public string Game;               // unitybuild.game property (null when not recorded)
+		public string Project;            // unitybuild.project property (null when not recorded)
 		public string Definition;         // unitybuild.definition property (null when not recorded)
 		public string BuildTypeId;        // owning executor config id
 		public string Agent;              // running agent name (null while queued)
