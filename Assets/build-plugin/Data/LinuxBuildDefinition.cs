@@ -8,7 +8,7 @@ namespace Ateo.Build
 	{
 		#region Properties
 
-		public override BuildPlatform Platform => BuildPlatform.LinuxStandalone;
+		public override BuildPlatform Platform => BuildPlatform.Linux;
 		public override ArtifactKind OutputKind => ArtifactKind.LinuxStandalone;
 
 		#endregion

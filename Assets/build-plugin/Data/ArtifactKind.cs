@@ -20,6 +20,17 @@ namespace Ateo.Build
 		WinStandalone,
 		LinuxStandalone,
 		WebGLBuild,
-		LinuxServerBuild
+		LinuxServerBuild,
+		WinServerBuild,
+		MacServerBuild,
+		UwpBuild,
+		TvOSBuild,
+		VisionOSBuild,
+		SwitchBuild,
+		PS4Build,
+		PS5Build,
+		XboxOneBuild,
+		XboxGDKOneBuild,
+		XboxSeriesBuild
 	}
 }

@@ -8,7 +8,7 @@ namespace Ateo.Build
 	{
 		#region Properties
 
-		public override BuildPlatform Platform => BuildPlatform.WindowsStandalone;
+		public override BuildPlatform Platform => BuildPlatform.Windows;
 		public override ArtifactKind OutputKind => ArtifactKind.WinStandalone;
 
 		#endregion

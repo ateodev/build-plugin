@@ -8,7 +8,7 @@ namespace Ateo.Build
 	{
 		#region Properties
 
-		public override BuildPlatform Platform => BuildPlatform.MacStandalone;
+		public override BuildPlatform Platform => BuildPlatform.Mac;
 		public override ArtifactKind OutputKind => ArtifactKind.MacApp;
 
 		#endregion

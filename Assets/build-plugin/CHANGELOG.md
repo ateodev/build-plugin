@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-07-01
+The full platform matrix + the `<team>/<project>/<target>` checkout contract.
+
+### Added
+- **Full `BuildPlatform` matrix (20 tokens)** — adds `WindowsServer`, `MacServer`, `UWP`, `tvOS`, `VisionOS`, and the console targets (`Switch`, `PS4`, `PS5`, `XboxOne`, `XboxGDKOne`, `XboxSeries`) on top of the existing desktop/mobile/web/Linux-server set. **18 authorable definition asset types**; dedicated **Server** is its own platform (Standalone* + `StandaloneBuildSubtarget.Server`). `Windows32`/`LinuxSim` are map-only; consoles are authorable but partner-SDK (fail-and-notify, never auto-installed).
+- **`unitybuild.target` build param** — the panel sends the leaf's platform token; it routes the build (capability lists) and is the `<build-target>` segment of the checkout/output path.
+
+### Changed
+- **Platform tokens shortened** — `WinStandalone`→`Windows`, `MacStandalone`→`Mac`, `LinuxStandalone`→`Linux` (short for Windows `MAX_PATH`); the `BuildPlatform` enum identifier IS the token.
+- `ServerBuildDefinition` → `LinuxServerBuildDefinition` (Windows/macOS dedicated server are now first-class siblings).
+- `BuildRunner` sets the standalone subtarget (Player/Server) on the built-in path (profile builds carry it); the no-profile path resolves `-buildTarget` from the token on the agent.
+
 ## [0.3.0] - 2026-07-01
 Self-service checkout + authoring refinements on top of v2. **Trigger contract change:** the build parameter is now `unitybuild.project` (a *project key*), replacing `unitybuild.game`/the old "slug"; update any custom triggers.
 

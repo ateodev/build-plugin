@@ -415,14 +415,16 @@ namespace Ateo.Build
 		{
 			switch (platform)
 			{
-				case BuildPlatform.Android:           return "Android";
-				case BuildPlatform.iOS:               return "iOS";
-				case BuildPlatform.WindowsStandalone: return "Windows";
-				case BuildPlatform.MacStandalone:     return "macOS";
-				case BuildPlatform.LinuxStandalone:   return "Linux";
-				case BuildPlatform.LinuxServer:       return "Linux Server";
-				case BuildPlatform.WebGL:             return "WebGL";
-				default:                              return platform.ToString();
+				case BuildPlatform.Android:       return "Android";
+				case BuildPlatform.iOS:           return "iOS";
+				case BuildPlatform.Windows:       return "Windows";
+				case BuildPlatform.Mac:           return "macOS";
+				case BuildPlatform.Linux:         return "Linux";
+				case BuildPlatform.WindowsServer: return "Windows Server";
+				case BuildPlatform.MacServer:     return "macOS Server";
+				case BuildPlatform.LinuxServer:   return "Linux Server";
+				case BuildPlatform.WebGL:         return "WebGL";
+				default:                          return platform.ToString();
 			}
 		}
 

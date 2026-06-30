@@ -51,8 +51,9 @@ namespace Ateo.Build
 		[NonSerialized] private bool _gitOk;
 		[NonSerialized] private string _result = "";
 
-		[BoxGroup("Target"), EnumToggleButtons, HideLabel, PropertyOrder(0)]
-		[SerializeField, Tooltip("The build target. The concrete BuildDefinition subclass is chosen from this - it IS the platform.")]
+		[BoxGroup("Target"), ValueDropdown(nameof(AuthorablePlatforms)), HideLabel, PropertyOrder(0)]
+		[SerializeField, Tooltip("The build target. The concrete BuildDefinition subclass is chosen from this - it IS the platform. " +
+			"The map-only Windows32 + LinuxSim targets are intentionally not offered.")]
 		private BuildPlatform _target = BuildPlatform.Android;
 
 		[BoxGroup("Target"), PropertyOrder(1)]
@@ -508,19 +509,45 @@ namespace Ateo.Build
 			}
 		}
 
+		/// <summary>The concrete definition asset type for a platform, or null if the platform is not authorable
+		/// (the map-only legacy/niche targets Windows32 + LinuxSim).</summary>
 		private static Type TypeForTarget(BuildPlatform target)
 		{
 			switch (target)
 			{
-				case BuildPlatform.Android:           return typeof(AndroidBuildDefinition);
-				case BuildPlatform.iOS:               return typeof(iOSBuildDefinition);
-				case BuildPlatform.WindowsStandalone: return typeof(WindowsBuildDefinition);
-				case BuildPlatform.MacStandalone:     return typeof(MacOSBuildDefinition);
-				case BuildPlatform.LinuxStandalone:   return typeof(LinuxBuildDefinition);
-				case BuildPlatform.LinuxServer:       return typeof(ServerBuildDefinition);
-				case BuildPlatform.WebGL:             return typeof(WebGLBuildDefinition);
-				default:                              return null;
+				case BuildPlatform.Android:       return typeof(AndroidBuildDefinition);
+				case BuildPlatform.iOS:           return typeof(iOSBuildDefinition);
+				case BuildPlatform.Windows:       return typeof(WindowsBuildDefinition);
+				case BuildPlatform.Mac:           return typeof(MacOSBuildDefinition);
+				case BuildPlatform.Linux:         return typeof(LinuxBuildDefinition);
+				case BuildPlatform.WindowsServer: return typeof(WindowsServerBuildDefinition);
+				case BuildPlatform.MacServer:     return typeof(MacServerBuildDefinition);
+				case BuildPlatform.LinuxServer:   return typeof(LinuxServerBuildDefinition);
+				case BuildPlatform.WebGL:         return typeof(WebGLBuildDefinition);
+				case BuildPlatform.UWP:           return typeof(UWPBuildDefinition);
+				case BuildPlatform.tvOS:          return typeof(TvOSBuildDefinition);
+				case BuildPlatform.VisionOS:      return typeof(VisionOSBuildDefinition);
+				case BuildPlatform.Switch:        return typeof(SwitchBuildDefinition);
+				case BuildPlatform.PS4:           return typeof(PS4BuildDefinition);
+				case BuildPlatform.PS5:           return typeof(PS5BuildDefinition);
+				case BuildPlatform.XboxOne:       return typeof(XboxOneBuildDefinition);
+				case BuildPlatform.XboxGDKOne:    return typeof(XboxGDKOneBuildDefinition);
+				case BuildPlatform.XboxSeries:    return typeof(XboxSeriesBuildDefinition);
+				default:                          return null; // Windows32, LinuxSim: map-only, not authorable
 			}
+		}
+
+		/// <summary>The platforms offered in the wizard's target dropdown - every BuildPlatform that has an
+		/// authorable definition type (excludes the map-only Windows32 + LinuxSim).</summary>
+		private static BuildPlatform[] AuthorablePlatforms()
+		{
+			System.Collections.Generic.List<BuildPlatform> list = new System.Collections.Generic.List<BuildPlatform>();
+			foreach (BuildPlatform platform in System.Enum.GetValues(typeof(BuildPlatform)))
+			{
+				if (TypeForTarget(platform) != null) list.Add(platform);
+			}
+
+			return list.ToArray();
 		}
 
 		private static string Quote(string value)

@@ -13,7 +13,7 @@ namespace Ateo.Build
 	/// service name are author-supplied settings.
 	/// </summary>
 	[System.Serializable]
-	public sealed class ServerDeploy : PostBuildAction<ServerBuildDefinition>
+	public sealed class ServerDeploy : PostBuildAction<LinuxServerBuildDefinition>
 	{
 		#region Constants
 
@@ -55,7 +55,7 @@ namespace Ateo.Build
 
 		#region Public Methods
 
-		protected override async Task<ActionResult> ExecuteAsync(BuildContext ctx, ServerBuildDefinition def)
+		protected override async Task<ActionResult> ExecuteAsync(BuildContext ctx, LinuxServerBuildDefinition def)
 		{
 			if (string.IsNullOrEmpty(_host) || string.IsNullOrEmpty(_targetFolder) || string.IsNullOrEmpty(_serviceName))
 			{

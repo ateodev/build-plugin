@@ -555,7 +555,10 @@ namespace Ateo.Build
 			Dictionary<string, string> properties = new Dictionary<string, string>
 			{
 				{ "unitybuild.project", _owner.Project != null ? _owner.Project.ProjectKey : "" },
-				{ "unitybuild.definition", _definition.DefinitionName }
+				{ "unitybuild.definition", _definition.DefinitionName },
+				// Per-build target platform token: a capability executor builds many platforms, so the checkout
+				// dir (<team>/<project>/<target>) and history need the platform for THIS build, not the executor's.
+				{ "unitybuild.target", _definition.Platform.ToServerToken() }
 			};
 
 #if UNITY_6000_0_OR_NEWER

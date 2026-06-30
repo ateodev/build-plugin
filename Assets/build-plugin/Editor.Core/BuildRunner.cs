@@ -657,6 +657,27 @@ namespace Ateo.Build
 			if (definition.Profile != null) return;
 #endif
 			BuildTarget target = definition.Platform.ToBuildTarget();
+
+			// Desktop standalone subtarget (Player vs dedicated Server). The built-in path sets it explicitly;
+			// profile builds carry it in the profile (and returned above). Like the target, it can't switch
+			// mid-script in batch mode - it flips UNITY_SERVER and recompiles - so a mismatch is fatal with guidance.
+			if (definition.Platform.ToBuildTargetGroup() == BuildTargetGroup.Standalone)
+			{
+				StandaloneBuildSubtarget desiredSubtarget = definition.Platform.ToSubtarget();
+				if (EditorUserBuildSettings.standaloneBuildSubtarget != desiredSubtarget)
+				{
+					if (context.IsBatchMode)
+					{
+						throw new Exception("Active standalone subtarget is " + EditorUserBuildSettings.standaloneBuildSubtarget +
+							" but the definition needs " + desiredSubtarget + ". In batch mode launch Unity with " +
+							"-standaloneBuildSubtarget " + desiredSubtarget + " (it flips UNITY_SERVER and cannot switch mid-script).");
+					}
+
+					Debug.Log("[Build] switching standalone subtarget -> " + desiredSubtarget + " (a recompile follows)");
+					EditorUserBuildSettings.standaloneBuildSubtarget = desiredSubtarget;
+				}
+			}
+
 			if (EditorUserBuildSettings.activeBuildTarget != target)
 			{
 				if (context.IsBatchMode)
@@ -750,7 +771,7 @@ namespace Ateo.Build
 			{
 				extension = android.Output == AndroidOutput.AAB ? ".aab" : ".apk";
 			}
-			else if (definition.Platform == BuildPlatform.WindowsStandalone)
+			else if (definition.Platform == BuildPlatform.Windows || definition.Platform == BuildPlatform.WindowsServer)
 			{
 				extension = ".exe";
 			}
