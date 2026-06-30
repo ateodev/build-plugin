@@ -520,7 +520,7 @@ namespace Ateo.Build
 
 			try
 			{
-				provider.CreateOrUpdateAsync(item, field, value).GetAwaiter().GetResult();
+				WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
 				Debug.Log("[Project Setup] Stored credential secret " + item + "/" + field + " (" + description + ").");
 			}
 			catch (Exception exception)
@@ -564,7 +564,7 @@ namespace Ateo.Build
 
 		private static void WriteField(ISecretProvider provider, string item, string field, string value)
 		{
-			provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty)).GetAwaiter().GetResult();
+			WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty)));
 		}
 
 		/// <summary>Provider-contract `vcsType` (§11.7): git / plastic / uvcs. UVCS is distinguished from on-prem Plastic by the chosen credential type.</summary>

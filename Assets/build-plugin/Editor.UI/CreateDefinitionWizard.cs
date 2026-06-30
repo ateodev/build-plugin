@@ -400,7 +400,7 @@ namespace Ateo.Build
 			{
 				try
 				{
-					SecretRef created = provider.CreateOrUpdateAsync(item, field, value).GetAwaiter().GetResult();
+					SecretRef created = WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
 					if (!string.IsNullOrEmpty(created.Reference)) reference = created.Reference;
 				}
 				catch (Exception exception)
@@ -553,6 +553,19 @@ namespace Ateo.Build
 	/// </summary>
 	internal static class WizardShell
 	{
+		/// <summary>
+		/// Run an async provider call to completion OFF the Editor main thread and return its result. The wizards'
+		/// Odin button handlers are synchronous on the main thread, and 1Password's async chain captures Unity's
+		/// SynchronizationContext - awaiting it via <c>.GetResult()</c> directly on the main thread DEADLOCKS (the
+		/// continuation can never resume on the blocked main thread). <see cref="System.Threading.Tasks.Task.Run(System.Func{System.Threading.Tasks.Task})"/>
+		/// gives the chain a thread-pool context instead, so it can't deadlock. Bounded by the op CLI's own timeout.
+		/// (A fully-async wizard would avoid the brief main-thread block entirely - a later refinement.)
+		/// </summary>
+		public static T RunSync<T>(System.Func<System.Threading.Tasks.Task<T>> call)
+		{
+			return System.Threading.Tasks.Task.Run(call).GetAwaiter().GetResult();
+		}
+
 		public static int Run(string exe, string arguments, string workingDirectory, out string stdout, out string stderr,
 			string stdin = null, int timeoutMs = 60000)
 		{
