@@ -174,6 +174,7 @@ namespace Ateo.Build
 					UseShellExecute = false,
 					RedirectStandardOutput = true,
 					RedirectStandardError = true,
+					RedirectStandardInput = true, // own stdin, closed below - a no-session prompt can't hang the caller
 					CreateNoWindow = true
 				};
 
@@ -188,12 +189,19 @@ namespace Ateo.Build
 						throw new Exception("Failed to launch op CLI ('" + startInfo.FileName + "'): " + exception.Message, exception);
 					}
 
+					process.StandardInput.Close(); // op never reads stdin; closing it guarantees no prompt can hang us
+
 					// Drain stdout as raw bytes (documents may be binary) and stderr as text, concurrently.
 					MemoryStream stdOut = new MemoryStream();
 					Task copyOut = process.StandardOutput.BaseStream.CopyToAsync(stdOut);
 					Task<string> readErr = process.StandardError.ReadToEndAsync();
 
-					process.WaitForExit();
+					if (!process.WaitForExit(30000))
+					{
+						try { process.Kill(); } catch (Exception) { /* best effort */ }
+						return new OpResult(-1, Array.Empty<byte>(), "op CLI did not finish within 30s and was killed.");
+					}
+
 					copyOut.GetAwaiter().GetResult();
 					string stdErr = readErr.GetAwaiter().GetResult();
 

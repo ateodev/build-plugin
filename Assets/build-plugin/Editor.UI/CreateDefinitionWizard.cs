@@ -553,7 +553,8 @@ namespace Ateo.Build
 	/// </summary>
 	internal static class WizardShell
 	{
-		public static int Run(string exe, string arguments, string workingDirectory, out string stdout, out string stderr)
+		public static int Run(string exe, string arguments, string workingDirectory, out string stdout, out string stderr,
+			string stdin = null, int timeoutMs = 60000)
 		{
 			ProcessStartInfo startInfo = new ProcessStartInfo
 			{
@@ -562,6 +563,7 @@ namespace Ateo.Build
 				UseShellExecute = false,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
+				RedirectStandardInput = true, // own stdin (never the editor's) - feed it or close it so a prompt can't hang us
 				CreateNoWindow = true,
 				WorkingDirectory = string.IsNullOrEmpty(workingDirectory) ? Environment.CurrentDirectory : workingDirectory
 			};
@@ -569,9 +571,26 @@ namespace Ateo.Build
 			using (Process process = new Process { StartInfo = startInfo })
 			{
 				process.Start();
-				stdout = process.StandardOutput.ReadToEnd();
-				stderr = process.StandardError.ReadToEnd();
-				process.WaitForExit();
+
+				// Write any expected input (e.g. ssh-keygen's empty passphrase, twice) then CLOSE stdin: any further
+				// prompt gets EOF and the tool fails fast instead of freezing the editor on WaitForExit forever.
+				if (!string.IsNullOrEmpty(stdin)) process.StandardInput.Write(stdin);
+				process.StandardInput.Close();
+
+				// Drain both pipes concurrently (sequential ReadToEnd can deadlock if the other buffer fills).
+				System.Threading.Tasks.Task<string> outTask = process.StandardOutput.ReadToEndAsync();
+				System.Threading.Tasks.Task<string> errTask = process.StandardError.ReadToEndAsync();
+
+				if (!process.WaitForExit(timeoutMs))
+				{
+					try { process.Kill(); } catch (Exception) { /* best effort */ }
+					stdout = "";
+					stderr = "'" + exe + "' did not finish within " + (timeoutMs / 1000) + "s and was killed (it likely prompted for input).";
+					return -1;
+				}
+
+				stdout = outTask.GetAwaiter().GetResult();
+				stderr = errTask.GetAwaiter().GetResult();
 				return process.ExitCode;
 			}
 		}

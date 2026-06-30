@@ -171,8 +171,10 @@ namespace Ateo.Build
 
 			try
 			{
+				// stdin "\n\n" answers ssh-keygen's two passphrase prompts with empty, in case the -N "" arg is lost in
+				// command-line quoting - so it can never block on a prompt (which froze the editor; see WizardShell.Run).
 				int exit = WizardShell.Run("ssh-keygen", "-t ed25519 -N \"\" -C " + Quote(name) + " -f " + Quote(temp),
-					BuildPanel.ProjectRoot, out _, out string stderr);
+					BuildPanel.ProjectRoot, out _, out string stderr, "\n\n");
 				if (exit != 0)
 				{
 					_validation = "ssh-keygen failed (" + exit + "): " + stderr + " - degrade: add a key manually.";
