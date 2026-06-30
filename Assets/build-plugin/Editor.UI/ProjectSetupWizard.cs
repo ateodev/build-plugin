@@ -508,24 +508,29 @@ namespace Ateo.Build
 			}
 		}
 
-		/// <summary>Store credential material as a provider secret, degrading to a logged TODO when the provider is signed out.</summary>
+		/// <summary>
+		/// Store credential material as a provider secret under the contract item name <c>cred-&lt;name&gt;</c>
+		/// (provider-contract.md): the agent resolves the credential a vcs-record points at as <c>cred-&lt;credentialName&gt;</c>,
+		/// so the wizard must write it with that prefix. Degrades to a logged TODO when the provider is signed out.
+		/// </summary>
 		private void Provision(string item, string field, SecretValue value, SecretKind kind, string description)
 		{
 			ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
+			string credItem = "cred-" + item;
 			if (provider == null)
 			{
-				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; record '" + item + "/" + field + "' manually (TODO).");
+				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; record '" + credItem + "/" + field + "' manually (TODO).");
 				return;
 			}
 
 			try
 			{
-				WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
-				Debug.Log("[Project Setup] Stored credential secret " + item + "/" + field + " (" + description + ").");
+				WizardShell.RunSync(() => provider.CreateOrUpdateAsync(credItem, field, value)); // off-main-thread: avoids the Editor deadlock
+				Debug.Log("[Project Setup] Stored credential secret " + credItem + "/" + field + " (" + description + ").");
 			}
 			catch (Exception exception)
 			{
-				Debug.LogWarning("[Project Setup] Could not store '" + item + "/" + field + "' (" + exception.Message +
+				Debug.LogWarning("[Project Setup] Could not store '" + credItem + "/" + field + "' (" + exception.Message +
 					"). Create it manually (TODO).");
 			}
 		}
