@@ -282,6 +282,7 @@ namespace Ateo.Build
 			}
 
 			ProvisionPendingCredential();
+			WriteVcsRecord();
 
 			ProjectConfig project = CreateInstance<ProjectConfig>();
 			ApplyFields(project);
@@ -497,6 +498,62 @@ namespace Ateo.Build
 				Debug.LogWarning("[Project Setup] Could not store '" + item + "/" + field + "' (" + exception.Message +
 					"). Create it manually (TODO).");
 			}
+		}
+
+		/// <summary>
+		/// Write the per-project VCS record <c>vcs-&lt;project-key&gt;</c> to the provider (§11.7) so the server
+		/// resolves {repoUrl, vcsType, credentialName, cmServer?} from the project key alone, **pre-checkout** — the
+		/// piece that makes onboarding self-service end to end. Degrades to a logged note if the provider is
+		/// unreachable. (Fields are written as concealed for now; a text-field variant for vault-UI inspectability
+		/// is a later polish.)
+		/// </summary>
+		private void WriteVcsRecord()
+		{
+			ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
+			string item = "vcs-" + _gameSlug;
+			if (provider == null)
+			{
+				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; create the '" + item + "' record manually (TODO).");
+				return;
+			}
+
+			try
+			{
+				WriteField(provider, item, "repoUrl", _repoUrl);
+				WriteField(provider, item, "vcsType", ResolvedVcsType());
+				WriteField(provider, item, "credentialName", ResolvedCredentialName());
+				string cmServer = ResolvedCmServer();
+				if (!string.IsNullOrEmpty(cmServer)) WriteField(provider, item, "cmServer", cmServer);
+				Debug.Log("[Project Setup] Wrote VCS record '" + item + "' (repoUrl, vcsType, credentialName).");
+			}
+			catch (Exception exception)
+			{
+				Debug.LogWarning("[Project Setup] Could not write VCS record '" + item + "' (" + exception.Message + "). Create it manually (TODO).");
+			}
+		}
+
+		private static void WriteField(ISecretProvider provider, string item, string field, string value)
+		{
+			provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty)).GetAwaiter().GetResult();
+		}
+
+		/// <summary>Provider-contract `vcsType` (§11.7): git / plastic / uvcs. UVCS is distinguished from on-prem Plastic by the chosen credential type.</summary>
+		private string ResolvedVcsType()
+		{
+			if (_vcs == VcsKind.Git) return "git";
+			if (_credentialMode == CredentialMode.AddNew && _credentialType == CredentialType.UvcsPat) return "uvcs";
+			return "plastic";
+		}
+
+		/// <summary>The `cm` server for plastic/uvcs. UVCS = <c>org@cloud</c>; an on-prem Plastic server isn't collected by the wizard yet (P3.2).</summary>
+		private string ResolvedCmServer()
+		{
+			if (ResolvedVcsType() == "uvcs" && !string.IsNullOrEmpty(_uvcsOrg))
+			{
+				return _uvcsOrg.Contains("@") ? _uvcsOrg : (_uvcsOrg + "@cloud");
+			}
+
+			return "";
 		}
 
 		#endregion
