@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using UnityEngine;
 
 namespace Ateo.Build
 {
@@ -66,6 +67,25 @@ namespace Ateo.Build
 
 			// Exit 0 with non-empty output = the field is present; any error (no item / no field) = absent.
 			return result.ExitCode == 0 && result.StdOut.Length > 0;
+		}
+
+		public async Task<IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account)
+		{
+			OpResult result = await RunAsync(new[] { "item", "get", item, "--vault", vault, "--format", "json" }, account);
+			if (result.ExitCode != 0) throw OpFailure("item get", result);
+
+			OpItemJson parsed = JsonUtility.FromJson<OpItemJson>(Encoding.UTF8.GetString(result.StdOut));
+			Dictionary<string, string> fields = new Dictionary<string, string>(StringComparer.Ordinal);
+			if (parsed != null && parsed.fields != null)
+			{
+				foreach (OpFieldJson dto in parsed.fields)
+				{
+					if (dto == null || string.IsNullOrEmpty(dto.label) || dto.label == "notesPlain") continue;
+					if (!fields.ContainsKey(dto.label)) fields[dto.label] = dto.value ?? string.Empty;
+				}
+			}
+
+			return fields;
 		}
 
 		public async Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account)
@@ -238,6 +258,9 @@ namespace Ateo.Build
 		#endregion
 
 		#region Nested Types
+
+		[Serializable] private sealed class OpItemJson { public OpFieldJson[] fields; }
+		[Serializable] private sealed class OpFieldJson { public string label; public string value; }
 
 		/// <summary>Captured result of one <c>op</c> invocation.</summary>
 		private readonly struct OpResult

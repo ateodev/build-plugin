@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Ateo.Build
@@ -20,6 +21,9 @@ namespace Ateo.Build
 
 		/// <summary>Whether the given field exists on the given item in the given vault (backs presence checks).</summary>
 		Task<bool> ItemFieldExistsAsync(string vault, string item, string field, string account);
+
+		/// <summary>Read every field (label -&gt; value) of an item - backs <see cref="ISecretProvider.ReadRecordAsync"/> (the <c>vcs-</c> record).</summary>
+		Task<IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account);
 
 		/// <summary>Create the item if absent, otherwise edit it, setting <paramref name="field"/> to <paramref name="value"/> (string or document).</summary>
 		Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account);

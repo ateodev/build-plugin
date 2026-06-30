@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Ateo.Build
@@ -19,10 +20,16 @@ namespace Ateo.Build
 		/// <summary>Resolve a reference to its value (string or file bytes) for the given execution side.</summary>
 		Task<SecretValue> ResolveAsync(SecretRef r, ExecContext ctx);
 
+		/// <summary>
+		/// Read a non-secret structured record (named fields) by item key - the <c>vcs-&lt;project-key&gt;</c>
+		/// checkout record (§11.7). Returns field-label -&gt; value (the agent reads the same via its own runtime).
+		/// </summary>
+		Task<IReadOnlyDictionary<string, string>> ReadRecordAsync(string item);
+
 		/// <summary>Whether the referenced secret exists - backs the panel's present? columns.</summary>
 		Task<bool> ExistsAsync(SecretRef r);
 
-		/// <summary>Create or update a secret and return its reference. OPTIONAL capability - only call when <see cref="SecretProviderCaps.Provisioning"/>.</summary>
+		/// <summary>Create or update a secret/record field and return its reference. MANDATORY - the wizard self-serves onboarding through it (§11.7).</summary>
 		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value);
 	}
 }

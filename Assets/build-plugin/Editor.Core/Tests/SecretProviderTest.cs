@@ -65,6 +65,18 @@ namespace Ateo.Build.Tests
 				return Task.FromResult(ExistsResult);
 			}
 
+			public System.Collections.Generic.IReadOnlyDictionary<string, string> RecordResult =
+				new System.Collections.Generic.Dictionary<string, string> { ["repoUrl"] = "git@example.com:o/r.git" };
+
+			public string LastFieldsItem;
+
+			public Task<System.Collections.Generic.IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account)
+			{
+				LastFieldsItem = item;
+				LastReadAccount = account;
+				return Task.FromResult(RecordResult);
+			}
+
 			public Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account)
 			{
 				LastCreateVault = vault;

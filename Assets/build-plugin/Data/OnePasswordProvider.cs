@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Ateo.Build
@@ -58,8 +59,8 @@ namespace Ateo.Build
 
 		public string Scheme => SchemeName;
 
-		/// <summary>1Password's desktop cache makes local resolution offline-capable; the provider can also provision and report presence.</summary>
-		public SecretProviderCaps Caps => new SecretProviderCaps(offline: true, provisioning: true, presence: true);
+		/// <summary>1Password's desktop cache makes local resolution offline-capable, and it reports presence. (Write is mandatory, not a capability flag.)</summary>
+		public SecretProviderCaps Caps => new SecretProviderCaps(offline: true, presence: true);
 
 		#endregion
 
@@ -79,6 +80,12 @@ namespace Ateo.Build
 
 			string value = await _op.ReadAsync(reference, _account);
 			return SecretValue.OfString(value);
+		}
+
+		public Task<IReadOnlyDictionary<string, string>> ReadRecordAsync(string item)
+		{
+			if (string.IsNullOrEmpty(item)) throw new Exception("1Password ReadRecord got an empty item key.");
+			return _op.GetItemFieldsAsync(_vault, item, _account);
 		}
 
 		public Task<bool> ExistsAsync(SecretRef r)

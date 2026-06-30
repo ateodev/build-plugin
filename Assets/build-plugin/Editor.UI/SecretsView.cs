@@ -148,13 +148,7 @@ namespace Ateo.Build
 
 		private static ISecretProvider ProviderFor(string scheme, ProjectConfig project)
 		{
-			switch (scheme)
-			{
-				case OnePasswordProvider.SchemeName:
-					return new OnePasswordProvider(project.SecretProviderVault, project.SecretProviderAccount);
-				default:
-					return null;
-			}
+			return SecretProviders.Resolve(scheme, project.SecretProviderVault, project.SecretProviderAccount);
 		}
 
 		#endregion

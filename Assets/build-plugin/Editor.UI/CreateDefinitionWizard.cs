@@ -276,9 +276,7 @@ namespace Ateo.Build
 
 			ProjectConfig project = _owner != null ? _owner.Project : null;
 			string game = project != null ? project.GameToken : "game";
-			ISecretProvider provider = project != null
-				? new OnePasswordProvider(project.SecretProviderVault, project.SecretProviderAccount)
-				: new OnePasswordProvider();
+			ISecretProvider provider = SecretProviders.ForProject(project);
 			string item = game + "-android-signing";
 
 			if (generated)
@@ -398,7 +396,7 @@ namespace Ateo.Build
 		{
 			string reference = OnePasswordProvider.SchemeName + "://" + OnePasswordProvider.DefaultVault + "/" + item + "/" + field;
 
-			if (provider != null && provider.Caps.Provisioning)
+			if (provider != null)
 			{
 				try
 				{

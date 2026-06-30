@@ -337,7 +337,7 @@ namespace Ateo.Build
 
 			try
 			{
-				ISecretProvider provider = new OnePasswordProvider();
+				ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
 				// A harmless presence probe; a signed-out provider throws and is reported, not fatal.
 				await provider.ExistsAsync(new SecretRef(
 					OnePasswordProvider.SchemeName + "://" + _secretProviderConfig + "/unity-licenses/" + _unityLicenseName));
@@ -480,10 +480,10 @@ namespace Ateo.Build
 		/// <summary>Store credential material as a provider secret, degrading to a logged TODO when the provider is signed out.</summary>
 		private void Provision(string item, string field, SecretValue value, SecretKind kind, string description)
 		{
-			ISecretProvider provider = new OnePasswordProvider();
-			if (!provider.Caps.Provisioning)
+			ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
+			if (provider == null)
 			{
-				Debug.Log("[Project Setup] Provider can't provision; record '" + item + "/" + field + "' manually (TODO).");
+				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; record '" + item + "/" + field + "' manually (TODO).");
 				return;
 			}
 

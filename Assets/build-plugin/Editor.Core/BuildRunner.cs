@@ -483,13 +483,9 @@ namespace Ateo.Build
 		/// </summary>
 		private static ISecretProvider ResolveSecretProvider(string scheme, ProjectConfig project)
 		{
-			switch (scheme)
-			{
-				case OnePasswordProvider.SchemeName:
-					return new OnePasswordProvider(project.SecretProviderVault, project.SecretProviderAccount);
-				default:
-					return null;
-			}
+			return SecretProviders.Resolve(scheme,
+				project != null ? project.SecretProviderVault : null,
+				project != null ? project.SecretProviderAccount : null);
 		}
 
 		/// <summary>
