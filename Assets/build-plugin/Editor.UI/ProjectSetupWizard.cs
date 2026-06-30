@@ -371,12 +371,38 @@ namespace Ateo.Build
 			try
 			{
 				int exit = WizardShell.Run("git", "remote get-url origin", BuildPanel.ProjectRoot, out string url, out _);
-				if (exit == 0 && !string.IsNullOrWhiteSpace(url)) _repoUrl = url.Trim();
+				if (exit == 0 && !string.IsNullOrWhiteSpace(url)) _repoUrl = ToSshRemote(url.Trim());
 			}
 			catch (Exception exception)
 			{
 				Debug.Log("[Project Setup] git remote auto-detect failed (" + exception.Message + ") - enter the repo URL manually.");
 			}
+		}
+
+		/// <summary>
+		/// Normalize a git remote to its SSH form - we only check out over SSH (deploy / bot keys), so a detected
+		/// <c>https://host/owner/repo(.git)</c> becomes <c>git@host:owner/repo.git</c>. Already-SSH URLs pass through.
+		/// </summary>
+		private static string ToSshRemote(string url)
+		{
+			if (string.IsNullOrEmpty(url)) return url;
+			if (url.StartsWith("git@", StringComparison.OrdinalIgnoreCase) || url.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase)) return url;
+
+			const string https = "https://";
+			if (url.StartsWith(https, StringComparison.OrdinalIgnoreCase))
+			{
+				string rest = url.Substring(https.Length);
+				int slash = rest.IndexOf('/');
+				if (slash > 0)
+				{
+					string host = rest.Substring(0, slash);
+					string path = rest.Substring(slash + 1).TrimEnd('/');
+					if (!path.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) path += ".git";
+					return "git@" + host + ":" + path;
+				}
+			}
+
+			return url;
 		}
 
 		private void RefreshLicenses()
