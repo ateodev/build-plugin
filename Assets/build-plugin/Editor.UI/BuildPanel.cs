@@ -134,6 +134,22 @@ namespace Ateo.Build
 			}
 		}
 
+		// Banner at the very top of the panel: if this project resolves secrets through 1Password but the op CLI
+		// isn't installed, nothing (build or wizard) can run - so say so loudly with install guidance.
+		[OnInspectorGUI, PropertyOrder(-1000)]
+		private void DrawOpCliWarning()
+		{
+			if (_project == null || _project.SecretProviderScheme != "op" || OpCli.IsAvailable()) return;
+
+			EditorGUILayout.HelpBox(
+				"1Password CLI ('op') not found. This project resolves its secrets and checkout credentials through " +
+				"it, so builds and the setup wizard cannot run until it is installed. Fix: install 1Password Desktop + " +
+				"CLI and enable Settings > Developer > 'Integrate with 1Password CLI' (or 'winget install " +
+				"AgileBits.1Password.CLI'); or set the OP_CLI_PATH environment variable to your op.exe.",
+				MessageType.Error);
+			EditorGUILayout.Space();
+		}
+
 		protected override void OnImGUI()
 		{
 			EnsurePolling();

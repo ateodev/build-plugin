@@ -109,11 +109,20 @@ namespace Ateo.Build
 		[SerializeField, LabelText("Type")]
 		private CredentialType _credentialType = CredentialType.GitDeployKey;
 
-		// Git key types.
+		// Git key types. Not [ReadOnly] - that greys the field and blocks text selection; the value is
+		// display-only (the real key lives in _publicKey), so an accidental edit is harmless.
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(ShowGitKey)), PropertyOrder(26)]
-		[SerializeField, ReadOnly, LabelText("Public key"), TextArea(2, 4),
-			Tooltip("Generated public key - add it to your repo host as a deploy key (deploy key = least privilege).")]
+		[SerializeField, LabelText("Public key"), TextArea(2, 4),
+			Tooltip("Generated public key - add it to your repo host as a deploy key (deploy key = least privilege). Select the text or use the Copy button below.")]
 		private string _publicKeyDisplay = "";
+
+		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(HasPublicKey)), PropertyOrder(26.5f)]
+		[Button(ButtonSizes.Medium, Name = "Copy public key to clipboard")]
+		private void CopyPublicKey()
+		{
+			EditorGUIUtility.systemCopyBuffer = _publicKey;
+			_validation = "Public key copied to clipboard.";
+		}
 
 		// Plastic user/pass.
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(ShowPlastic)), PropertyOrder(27)]
@@ -153,6 +162,7 @@ namespace Ateo.Build
 		private bool IsSelectExisting => _credentialMode == CredentialMode.SelectExisting;
 		private bool IsAddNew => _credentialMode == CredentialMode.AddNew;
 		private bool ShowGitKey => IsAddNew && (_credentialType == CredentialType.GitDeployKey || _credentialType == CredentialType.GitSshKey);
+		private bool HasPublicKey => ShowGitKey && !string.IsNullOrEmpty(_publicKey);
 		private bool ShowPlastic => IsAddNew && _credentialType == CredentialType.PlasticUserpass;
 		private bool ShowUvcs => IsAddNew && _credentialType == CredentialType.UvcsPat;
 		private bool ShowUvcsGenerate => ShowUvcs && _patMode == PatMode.GenerateNow;

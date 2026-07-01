@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.Build;
 #if UNITY_6000_0_OR_NEWER
@@ -384,9 +386,9 @@ namespace Ateo.Build
 				// hard precondition failure (the action can't do its job), so it fails the build with a clear message.
 				ResolveActionSecrets(context, action, execContext, log);
 
-				// Run (await synchronously - batch mode has no sync context, so GetResult cannot deadlock).
+				// Run. RunSync avoids the Editor sync-context deadlock for interactive local builds.
 				log("post-build action: " + name);
-				ActionResult actionResult = action.ExecuteAsync(context, definition).GetAwaiter().GetResult()
+				ActionResult actionResult = RunSync(() => action.ExecuteAsync(context, definition))
 					?? throw new Exception("Post-build action '" + name + "' returned a null result.");
 
 				if (!actionResult.Success)
@@ -464,7 +466,7 @@ namespace Ateo.Build
 
 				try
 				{
-					SecretValue value = provider.ResolveAsync(secretRef, execContext).GetAwaiter().GetResult()
+					SecretValue value = RunSync(() => provider.ResolveAsync(secretRef, execContext))
 						?? throw new Exception("provider returned a null value");
 					(context.Secrets ??= new Dictionary<string, SecretValue>())[key] = value;
 					log("resolved secret '" + key + "'.");
@@ -649,6 +651,20 @@ namespace Ateo.Build
 		#endregion
 
 		#region Private Methods - Apply Definition Settings
+
+		/// <summary>
+		/// Awaits a task synchronously without deadlocking the Editor. Batch mode has no SynchronizationContext,
+		/// so a direct GetResult is safe; the interactive Editor DOES (Unity's), and a main-thread GetResult on a
+		/// task that resumes on that context deadlocks - so there the work runs on a thread-pool thread instead.
+		/// Safe for our awaited work (post-build actions, op-CLI secret resolution) because it shells out and does
+		/// not touch main-thread-only Unity APIs.
+		/// </summary>
+		private static T RunSync<T>(Func<Task<T>> asyncFunc)
+		{
+			if (SynchronizationContext.Current == null) return asyncFunc().GetAwaiter().GetResult();
+
+			return Task.Run(asyncFunc).GetAwaiter().GetResult();
+		}
 
 		private static void EnsureBuildTarget(BuildDefinition definition, BuildContext context)
 		{

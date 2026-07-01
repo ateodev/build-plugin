@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0] - 2026-07-01
+Editor UX + local-build reliability.
+
+### Added
+- **op CLI presence banner** — the Build Panel shows an actionable error at the top when a 1Password-backed project is opened without the `op` CLI installed (nothing — build or wizard — can run without it).
+- **Copy-public-key button** — the project-setup wizard's generated deploy-key field is now selectable (no longer greyed `[ReadOnly]`) and has a "Copy public key to clipboard" button.
+
+### Fixed
+- **Local (in-Editor) builds no longer deadlock** — post-build actions and secret resolution await via a helper that runs off Unity's SynchronizationContext in the Editor (batch/CI behaviour unchanged).
+
 ## [0.4.0] - 2026-07-01
 The full platform matrix + the `<team>/<project>/<target>` checkout contract.
 

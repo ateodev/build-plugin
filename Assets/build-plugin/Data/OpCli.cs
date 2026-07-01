@@ -42,6 +42,30 @@ namespace Ateo.Build
 			return "op";
 		}
 
+		/// <summary>
+		/// True if the op CLI can be located WITHOUT running it: an explicit/winget path that exists, or an
+		/// <c>op</c>/<c>op.exe</c> on PATH. A cheap presence check for the panel to gate 1Password-backed
+		/// projects (op is the client↔server channel; nothing works if it's missing).
+		/// </summary>
+		public static bool IsAvailable()
+		{
+			if (ResolveCliPath() != "op") return true; // a concrete path was found (File.Exists already verified)
+
+			string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+			foreach (string dir in path.Split(Path.PathSeparator))
+			{
+				if (string.IsNullOrWhiteSpace(dir)) continue;
+
+				try
+				{
+					if (File.Exists(Path.Combine(dir, "op.exe")) || File.Exists(Path.Combine(dir, "op"))) return true;
+				}
+				catch { /* skip a malformed PATH entry */ }
+			}
+
+			return false;
+		}
+
 		public async Task<string> ReadAsync(string opRef, string account)
 		{
 			OpResult result = await RunAsync(new[] { "read", opRef }, account);
