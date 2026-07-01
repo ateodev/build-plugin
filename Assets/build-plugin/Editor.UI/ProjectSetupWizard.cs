@@ -53,7 +53,8 @@ namespace Ateo.Build
 		[BoxGroup("Project"), PropertyOrder(0)]
 		[InfoBox("The join key (lowercase a-z 0-9 and '-'). Onboarding writes the vcs-<project-key> record + credential to " +
 			"your secret provider, so the build server resolves repo, credentials, signing and license from it - no admin step.", InfoMessageType.Info)]
-		[SerializeField, LabelText("Project key"), Tooltip("Unique project key - lowercase, a-z 0-9 and '-' only. Suggested from the product name; editable.")]
+		[OnValueChanged(nameof(SanitizeProjectKey))]
+		[SerializeField, LabelText("Project key"), Tooltip("Unique project key - lowercase, a-z 0-9 and '-' only (whitespace becomes '-'). Suggested from the product name; edits auto-format as you type.")]
 		private string _projectKey = "";
 
 		[NonSerialized] private List<string> _teams = new List<string>();
@@ -467,12 +468,20 @@ namespace Ateo.Build
 
 		private void AutoDetect()
 		{
-			// Project key is intentionally NOT pre-filled - the dev types it deliberately (a wrong guess like the
-			// Unity product name is worse than a blank field the wizard forces you to fill in).
+			// Pre-fill the project key from the Unity product name, already run through the key normalizer so the
+			// suggestion is itself valid (lowercase [a-z0-9-]); the dev can edit it and every keystroke re-normalizes.
+			if (string.IsNullOrEmpty(_projectKey)) _projectKey = ToProjectKey(Application.productName);
 			if (string.IsNullOrEmpty(_unityVersion)) _unityVersion = Application.unityVersion;
 			DetectGitRemote();
 			RefreshLicenses();
 			RefreshFromServer(); // populate the Team dropdown + coords up front (no-op without a token / if unreachable)
+		}
+
+		/// <summary>Live input styling for the project-key field: every edit re-normalizes to lowercase [a-z0-9-]
+		/// (whitespace/illegal chars → '-'), so the field can only ever hold a valid key.</summary>
+		private void SanitizeProjectKey()
+		{
+			_projectKey = ToProjectKey(_projectKey);
 		}
 
 		private void DetectGitRemote()
