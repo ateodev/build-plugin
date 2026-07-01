@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.7] - 2026-07-01
+### Fixed
+- **Project key formats truly live** — `[OnValueChanged]` only re-formatted the *backing* field, so the change wasn't visible until focus-loss. Now custom-drawn: the input **event** is transformed as you type (space → `-`, uppercase → lowercase, illegal chars blocked), so the field's own buffer is always a valid key; a full normalize (`--` collapse / trim / paste) runs on focus-loss.
+
 ## [0.6.6] - 2026-07-01
 ### Changed (project-setup wizard)
 - **Project key: pre-filled *and* live-formatted** — re-suggested from the Unity product name (itself normalized), and the field now re-normalizes on every edit via `[OnValueChanged]` → lowercase, whitespace/illegal chars become `-`, `--` collapsed, so it can only ever hold a valid `[a-z0-9-]` key.

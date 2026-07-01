@@ -50,12 +50,36 @@ namespace Ateo.Build
 
 		// --- Identity -----------------------------------------------------------------------------------------
 
-		[BoxGroup("Project"), PropertyOrder(0)]
-		[InfoBox("The join key (lowercase a-z 0-9 and '-'). Onboarding writes the vcs-<project-key> record + credential to " +
-			"your secret provider, so the build server resolves repo, credentials, signing and license from it - no admin step.", InfoMessageType.Info)]
-		[OnValueChanged(nameof(SanitizeProjectKey))]
-		[SerializeField, LabelText("Project key"), Tooltip("Unique project key - lowercase, a-z 0-9 and '-' only (whitespace becomes '-'). Suggested from the product name; edits auto-format as you type.")]
-		private string _projectKey = "";
+		[SerializeField, HideInInspector] private string _projectKey = "";
+
+		// Custom-drawn so the key formats LIVE as you type: [OnValueChanged] fires per keystroke on the backing
+		// field, but a focused IMGUI text field keeps its OWN edit buffer, so the reformat isn't visible until
+		// focus-loss. Transforming the input EVENT (space -> '-', upper -> lower, block illegal) makes the field's
+		// buffer itself only ever hold valid chars; a full normalize on focus-loss handles paste + '--' collapse/trim.
+		[BoxGroup("Project"), PropertyOrder(0), OnInspectorGUI]
+		private void DrawProjectKey()
+		{
+			EditorGUILayout.HelpBox("The join key (lowercase a-z 0-9 and '-'). Onboarding writes the vcs-<project-key> record + " +
+				"credential to your secret provider, so the build server resolves repo, credentials, signing and license from it - no admin step.",
+				MessageType.Info);
+
+			const string controlName = "ateo.projectKey";
+			Event e = Event.current;
+			if (e.type == EventType.KeyDown && GUI.GetNameOfFocusedControl() == controlName)
+			{
+				char c = e.character;
+				if (c == ' ') e.character = '-';
+				else if (c >= 'A' && c <= 'Z') e.character = char.ToLowerInvariant(c);
+				else if (c != '\0' && !char.IsControl(c) && !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) e.Use();
+			}
+
+			GUI.SetNextControlName(controlName);
+			_projectKey = EditorGUILayout.TextField(
+				new GUIContent("Project key", "Unique project key - lowercase a-z 0-9 and '-' (whitespace becomes '-'). Suggested from the product name; formats live as you type."),
+				_projectKey);
+
+			if (GUI.GetNameOfFocusedControl() != controlName) _projectKey = ToProjectKey(_projectKey);
+		}
 
 		[NonSerialized] private List<string> _teams = new List<string>();
 
@@ -475,13 +499,6 @@ namespace Ateo.Build
 			DetectGitRemote();
 			RefreshLicenses();
 			RefreshFromServer(); // populate the Team dropdown + coords up front (no-op without a token / if unreachable)
-		}
-
-		/// <summary>Live input styling for the project-key field: every edit re-normalizes to lowercase [a-z0-9-]
-		/// (whitespace/illegal chars → '-'), so the field can only ever hold a valid key.</summary>
-		private void SanitizeProjectKey()
-		{
-			_projectKey = ToProjectKey(_projectKey);
 		}
 
 		private void DetectGitRemote()
