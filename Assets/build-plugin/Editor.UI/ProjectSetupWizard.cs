@@ -14,14 +14,15 @@ namespace Ateo.Build
 	/// <summary>
 	/// The first-run project-setup wizard (§13.2), a floating <see cref="OdinEditorWindow"/> the Build Panel
 	/// offers when no <see cref="ProjectConfig"/> asset exists. Heavy on auto-detection (project key from the
-	/// product name, repo URL from <c>git remote</c>, Unity version from the editor), it gathers the per-project
-	/// onboarding facts - project key, team, server URL, secrets-provider config, VCS + a reusable checkout credential
-	/// (the credential registry §13.3), Slack channel, Unity license (§13.4) - then <c>Validate</c>s the server
-	/// connection + provider auth and writes <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing
-	/// lives in the Settings view.
+	/// product name, repo URL from <c>git remote</c>), it gathers the per-project onboarding facts - project key,
+	/// team (which supplies the secret-provider coords from its TeamCity params), server URL, VCS + a reusable
+	/// checkout credential (the credential registry §13.3), Slack channel, Unity license (§13.4) - then
+	/// <c>Create ProjectConfig</c> provisions the pending credential secrets, writes the <c>vcs-&lt;key&gt;</c>
+	/// record and creates <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing lives in the
+	/// Settings view.
 	///
-	/// Live integrations (TeamCity, the <c>op</c>/<c>cm</c>/<c>ssh-keygen</c> CLIs) DEGRADE GRACEFULLY: a missing
-	/// tool / signed-out provider logs and continues; the asset is still creatable.
+	/// Live integrations (TeamCity, the secret provider, the <c>cm</c>/<c>ssh-keygen</c> CLIs) DEGRADE GRACEFULLY:
+	/// a missing tool / signed-out provider logs and continues; the asset is still creatable.
 	/// </summary>
 	public sealed class ProjectSetupWizard : OdinEditorWindow
 	{
@@ -492,7 +493,7 @@ namespace Ateo.Build
 			if (string.IsNullOrEmpty(_unityLicenseName)) _unityLicenseName = _licenses[0];
 		}
 
-		/// <summary>Best-effort read of the field labels on the 1Password unity-licenses item (the license registry §13.4).</summary>
+		/// <summary>Best-effort read of the field labels on the provider's unity-licenses record (the license registry §13.4).</summary>
 		private List<string> ReadLicenseNames()
 		{
 			try
@@ -516,7 +517,7 @@ namespace Ateo.Build
 			}
 			catch (Exception exception)
 			{
-				Debug.Log("[Project Setup] Could not read unity-licenses from 1Password (" + exception.Message + ") - using a free-text license field.");
+				Debug.Log("[Project Setup] Could not read the unity-licenses record via provider '" + _secretProviderScheme + "' (" + exception.Message + ") - using a free-text license field.");
 				return null;
 			}
 		}
@@ -619,8 +620,8 @@ namespace Ateo.Build
 		/// Write the per-project VCS record <c>vcs-&lt;project-key&gt;</c> to the provider (§11.7) so the server
 		/// resolves {repoUrl, vcsType, credentialName, cmServer?} from the project key alone, **pre-checkout** — the
 		/// piece that makes onboarding self-service end to end. Degrades to a logged note if the provider is
-		/// unreachable. (Fields are written as concealed for now; a text-field variant for vault-UI inspectability
-		/// is a later polish.)
+		/// unreachable. (Fields are written as plain text, concealed:false - they are non-secret pointers, kept
+		/// inspectable in the vault UI.)
 		/// </summary>
 		private void WriteVcsRecord()
 		{
@@ -746,19 +747,6 @@ namespace Ateo.Build
 		{
 			GenerateNow,
 			Paste
-		}
-
-		[Serializable]
-		private sealed class OpItem
-		{
-			public OpField[] fields;
-		}
-
-		[Serializable]
-		private sealed class OpField
-		{
-			public string label;
-			public string id;
 		}
 
 		#endregion

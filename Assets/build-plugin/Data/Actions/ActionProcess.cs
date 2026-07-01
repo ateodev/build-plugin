@@ -17,6 +17,13 @@ namespace Ateo.Build
 	/// </summary>
 	internal static class ActionProcess
 	{
+		#region Constants
+
+		/// <summary>Default per-invocation timeout - generous because store uploads (Steam depots, BPT chunking) can legitimately run long.</summary>
+		private const int DefaultTimeoutMinutes = 120;
+
+		#endregion
+
 		#region Public Methods
 
 		/// <summary>
@@ -24,9 +31,11 @@ namespace Ateo.Build
 		/// command line), optionally in <paramref name="workingDirectory"/> and with extra <paramref name="environment"/>
 		/// overlaid on the inherited environment. Captures stdout + stderr and the exit code. A launch failure throws
 		/// (the executable is missing / not runnable); a non-zero exit is reported through <see cref="ToolResult"/>.
+		/// A tool still running after <paramref name="timeoutMinutes"/> is killed and reported as a failure.
 		/// </summary>
 		public static Task<ToolResult> RunAsync(string fileName, IReadOnlyList<string> args,
-			string workingDirectory = null, IReadOnlyDictionary<string, string> environment = null)
+			string workingDirectory = null, IReadOnlyDictionary<string, string> environment = null,
+			int timeoutMinutes = DefaultTimeoutMinutes)
 		{
 			return Task.Run(() =>
 			{
@@ -63,7 +72,16 @@ namespace Ateo.Build
 
 					Task<string> readOut = process.StandardOutput.ReadToEndAsync();
 					Task<string> readErr = process.StandardError.ReadToEndAsync();
-					process.WaitForExit();
+
+					// A hung tool must not block the build forever - kill it and surface an actionable failure.
+					if (!process.WaitForExit((int)TimeSpan.FromMinutes(timeoutMinutes).TotalMilliseconds))
+					{
+						try { process.Kill(); } catch (Exception) { /* best effort */ }
+						return new ToolResult(-1, string.Empty,
+							"'" + fileName + "' did not finish within " + timeoutMinutes + " minutes and was killed. " +
+							"If the tool legitimately needs longer, raise the RunAsync timeoutMinutes for this action.");
+					}
+
 					string stdOut = readOut.GetAwaiter().GetResult();
 					string stdErr = readErr.GetAwaiter().GetResult();
 

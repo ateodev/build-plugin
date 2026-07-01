@@ -8,8 +8,10 @@ namespace Ateo.Build.Tests
 	/// <summary>
 	/// TEST-ONLY headless harness for <see cref="OnePasswordProvider"/>, driven by a FAKE <see cref="IOpCli"/> so it
 	/// needs no real 1Password session. Proves the provider parses an <c>op://Build Server/&lt;item&gt;/&lt;field&gt;</c>
-	/// reference, returns the resolved value, that <c>ExistsAsync</c> splits the reference into vault/item/field, and
-	/// that a File-kind reference routes to <c>ReadDocumentAsync</c> (not the string read). Run from CI/CLI with:
+	/// reference, returns the resolved value, that <c>ExistsAsync</c> splits the reference into vault/item/field, that
+	/// a File-kind reference routes to <c>ReadDocumentAsync</c> (not the string read), and the File/document round-trip:
+	/// CreateOrUpdateAsync(File) returns the field-less <c>op://&lt;vault&gt;/&lt;item&gt;</c> document reference, which
+	/// resolves as a document and whose presence is checked at ITEM level. Run from CI/CLI with:
 	///   Unity ... -batchmode -quit -executeMethod Ateo.Build.Tests.SecretProviderTest.RunSecretProviderTests
 	/// Exits 0 when every check passes, 1 otherwise. Mirrors PipelineSmokeTest's style (sample, not a shipped type).
 	/// </summary>
@@ -65,6 +67,20 @@ namespace Ateo.Build.Tests
 				return Task.FromResult(ExistsResult);
 			}
 
+			public string LastItemExistsVault;
+			public string LastItemExistsItem;
+			public bool ItemExistsCalled;
+			public bool ItemExistsResult = true;
+
+			public Task<bool> ItemExistsAsync(string vault, string item, string account)
+			{
+				ItemExistsCalled = true;
+				LastItemExistsVault = vault;
+				LastItemExistsItem = item;
+				LastReadAccount = account;
+				return Task.FromResult(ItemExistsResult);
+			}
+
 			public System.Collections.Generic.IReadOnlyDictionary<string, string> RecordResult =
 				new System.Collections.Generic.Dictionary<string, string> { ["repoUrl"] = "git@example.com:o/r.git" };
 
@@ -100,6 +116,9 @@ namespace Ateo.Build.Tests
 			failures += ResolveFileSecret();
 			failures += ExistsParsesReference();
 			failures += CreateRoundTrips();
+			failures += CreateFileSecretReturnsDocumentRef();
+			failures += ResolveDocumentRef();
+			failures += ExistsChecksItemForDocumentRef();
 
 			Debug.Log(failures == 0 ? "[SecretProviderTest] RESULT: ALL PASS" : "[SecretProviderTest] RESULT: FAILURES=" + failures);
 			if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
@@ -177,6 +196,62 @@ namespace Ateo.Build.Tests
 			failures += Check(fake.LastCreateItem == "Steam" && fake.LastCreateField == "password", "create forwards item/field to the CLI");
 			failures += Check(fake.LastCreateVault == OnePasswordProvider.DefaultVault, "create targets the configured vault");
 			failures += Check(created.Reference == "op://Build Server/Steam/password", "returned reference points at the new secret");
+
+			return failures;
+		}
+
+		/// <summary>A File value is stored as a DOCUMENT and returns the field-less op://vault/item reference (the
+		/// document form the agent fetches by item name), not a dead op://vault/item/field pointer.</summary>
+		private static int CreateFileSecretReturnsDocumentRef()
+		{
+			int failures = 0;
+			FakeOpCli fake = new FakeOpCli();
+			OnePasswordProvider provider = new OnePasswordProvider(fake);
+
+			SecretRef created = provider
+				.CreateOrUpdateAsync("cred-team", "credential", SecretValue.OfFile(Encoding.UTF8.GetBytes("KEY-BYTES")))
+				.GetAwaiter().GetResult();
+
+			failures += Check(fake.LastCreateItem == "cred-team", "create forwards the item to the CLI");
+			failures += Check(fake.LastCreateValue != null && fake.LastCreateValue.IsFile, "the File value reaches the CLI as a file");
+			failures += Check(created.Reference == "op://Build Server/cred-team", "File secret returns the field-less document reference");
+			failures += Check(created.Kind == SecretKind.File, "the returned reference keeps its File kind");
+
+			return failures;
+		}
+
+		/// <summary>A field-less document ref resolves via ReadDocumentAsync - a document is addressed by item alone.</summary>
+		private static int ResolveDocumentRef()
+		{
+			int failures = 0;
+			byte[] doc = Encoding.UTF8.GetBytes("PRIVATE-KEY-BYTES");
+			FakeOpCli fake = new FakeOpCli { DocumentResult = doc };
+			OnePasswordProvider provider = new OnePasswordProvider(fake);
+
+			SecretRef reference = new SecretRef("op://Build Server/cred-team", SecretKind.File);
+			SecretValue value = provider.ResolveAsync(reference, ExecContext.Server).GetAwaiter().GetResult();
+
+			failures += Check(fake.ReadDocumentCalled && !fake.ReadStringCalled, "field-less ref routed to ReadDocumentAsync");
+			failures += Check(value != null && value.IsFile && BytesEqual(value.FileBytes, doc), "document bytes returned verbatim");
+			failures += Check(fake.LastDocumentRef == "op://Build Server/cred-team", "the field-less ref is passed through unmodified");
+
+			return failures;
+		}
+
+		/// <summary>ExistsAsync on a field-less document ref checks ITEM existence - a document has no field to probe.</summary>
+		private static int ExistsChecksItemForDocumentRef()
+		{
+			int failures = 0;
+			FakeOpCli fake = new FakeOpCli { ItemExistsResult = true };
+			OnePasswordProvider provider = new OnePasswordProvider(fake);
+
+			bool exists = provider.ExistsAsync(new SecretRef("op://Build Server/cred-team", SecretKind.File))
+				.GetAwaiter().GetResult();
+
+			failures += Check(exists, "ExistsAsync returns the CLI's item-presence result");
+			failures += Check(fake.ItemExistsCalled, "field-less ref routed to ItemExistsAsync");
+			failures += Check(fake.LastItemExistsVault == "Build Server" && fake.LastItemExistsItem == "cred-team", "vault/item parsed from the document ref");
+			failures += Check(fake.LastExistsItem == null, "no field-level probe was attempted");
 
 			return failures;
 		}

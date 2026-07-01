@@ -92,6 +92,9 @@ namespace Ateo.Build
 				? ctx.VersionCode.ToString()
 				: ctx.VersionName + "+" + ctx.VersionCode;
 
+			// CONSTRAINT: BuildPatchTool only accepts -ClientSecret= as a command-line argument - it documents no
+			// env var or credential-file alternative, so the secret unavoidably appears in the process list for the
+			// upload's duration. Mitigate by scoping the BPT client credential to uploads only, not code.
 			List<string> args = new List<string>
 			{
 				"-mode=UploadBinary",

@@ -7,7 +7,8 @@ namespace Ateo.Build
 	/// <summary>
 	/// The default <see cref="ISecretProvider"/>: 1Password, backed by the <c>op</c> CLI through an
 	/// <see cref="IOpCli"/> seam (so the provider is unit-testable with a fake CLI). Resolves
-	/// <c>op://Build Server/&lt;item&gt;/&lt;field&gt;</c> references against the single "Build Server" vault -
+	/// <c>op://Build Server/&lt;item&gt;/&lt;field&gt;</c> references (and the field-less
+	/// <c>op://Build Server/&lt;item&gt;</c> document form for File secrets) against the single "Build Server" vault -
 	/// devs hit their unlocked desktop app (offline) locally, the agent uses a robot-account session server-side
 	/// (the auth bootstrap is environment-local; this code never signs in). Provisioning is supported, so the
 	/// panel can create/edit secrets. See build-plugin-architecture.md §11.1 / §11.3.
@@ -77,10 +78,13 @@ namespace Ateo.Build
 		public async Task<SecretValue> ResolveAsync(SecretRef r, ExecContext ctx)
 		{
 			string reference = RequireOpReference(r);
+			(_, _, string field) = ParseReference(reference);
 
-			// File-kind secrets (Play SA-JSON, Apple .p8, the match deploy key) are 1Password DOCUMENTS - read as
-			// raw bytes; everything else (passwords, tokens, TOTP shared_secret) reads as a string.
-			if (r.Kind == SecretKind.File)
+			// File-kind secrets (Play SA-JSON, Apple .p8, the match deploy key) are 1Password DOCUMENTS, addressed
+			// by the field-less op://<vault>/<item> form ('op read' returns a document item's content) - read as
+			// raw bytes; a field-less reference can only be a document, so it routes there regardless of the
+			// declared kind. Everything else (passwords, tokens, TOTP shared_secret) reads as a string.
+			if (r.Kind == SecretKind.File || field == null)
 			{
 				byte[] bytes = await _op.ReadDocumentAsync(reference, _account);
 				return SecretValue.OfFile(bytes);
@@ -100,7 +104,11 @@ namespace Ateo.Build
 		{
 			string reference = RequireOpReference(r);
 			(string vault, string item, string field) = ParseReference(reference);
-			return _op.ItemFieldExistsAsync(vault, item, field, _account);
+
+			// A field-less document reference has no field to probe - item presence IS the secret's presence.
+			return field == null
+				? _op.ItemExistsAsync(vault, item, _account)
+				: _op.ItemFieldExistsAsync(vault, item, field, _account);
 		}
 
 		public async Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value, bool concealed = true)
@@ -113,7 +121,14 @@ namespace Ateo.Build
 
 		public SecretRef ReferenceFor(string item, string field, SecretKind kind = SecretKind.String)
 		{
-			return new SecretRef(SchemeName + "://" + _vault + "/" + item + "/" + field, kind);
+			// File secrets are DOCUMENTS addressed by item name alone (op://<vault>/<item>) - a document has no
+			// field, and the agent fetches it by item name too ('op document get'), so the committed pointer must
+			// stay field-less to round-trip on both runtimes.
+			string reference = kind == SecretKind.File
+				? SchemeName + "://" + _vault + "/" + item
+				: SchemeName + "://" + _vault + "/" + item + "/" + field;
+
+			return new SecretRef(reference, kind);
 		}
 
 		#endregion
@@ -135,7 +150,9 @@ namespace Ateo.Build
 			return r.Reference;
 		}
 
-		/// <summary>Parses <c>op://&lt;vault&gt;/&lt;item&gt;/&lt;field&gt;</c> into its three segments (vault may contain spaces, e.g. "Build Server").</summary>
+		/// <summary>Parses <c>op://&lt;vault&gt;/&lt;item&gt;[/&lt;field&gt;]</c> into its segments (vault may contain
+		/// spaces, e.g. "Build Server"). Field is null for the field-less DOCUMENT form (File secrets - see
+		/// <see cref="ReferenceFor"/>).</summary>
 		private static (string Vault, string Item, string Field) ParseReference(string reference)
 		{
 			const string prefix = SchemeName + "://";
@@ -146,13 +163,13 @@ namespace Ateo.Build
 
 			string body = reference.Substring(prefix.Length);
 			string[] parts = body.Split('/');
-			if (parts.Length != 3 || Array.Exists(parts, string.IsNullOrEmpty))
+			if ((parts.Length != 2 && parts.Length != 3) || Array.Exists(parts, string.IsNullOrEmpty))
 			{
 				throw new Exception("Malformed op reference '" + reference +
-					"'. Expected op://<vault>/<item>/<field>.");
+					"'. Expected op://<vault>/<item>/<field> or op://<vault>/<item> (document).");
 			}
 
-			return (parts[0], parts[1], parts[2]);
+			return (parts[0], parts[1], parts.Length == 3 ? parts[2] : null);
 		}
 
 		#endregion

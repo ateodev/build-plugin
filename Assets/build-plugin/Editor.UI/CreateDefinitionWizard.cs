@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
 using Sirenix.OdinInspector;
 using Sirenix.OdinInspector.Editor;
 using UnityEditor;
@@ -277,7 +278,7 @@ namespace Ateo.Build
 
 			ProjectConfig project = _owner != null ? _owner.Project : null;
 			string projectKey = project != null ? project.ProjectKey : "project";
-			ISecretProvider provider = SecretProviders.ForBuild();
+			ISecretProvider provider = ResolveTeamProvider(project);
 			string item = projectKey + "-android-signing";
 
 			if (generated)
@@ -392,27 +393,76 @@ namespace Ateo.Build
 
 		#region Secrets
 
+		/// <summary>
+		/// The provider used to provision this wizard's secrets. Coordinates are TEAM-level (single source, §11.7):
+		/// fetched from the project's team's TeamCity params, mirroring the setup wizard - NOT the local build-env
+		/// defaults, which may point somewhere other than the team's vault. Those defaults are the fallback only
+		/// when there is no ProjectConfig/team/token or the fetch fails, and that fallback warns visibly.
+		/// </summary>
+		private static ISecretProvider ResolveTeamProvider(ProjectConfig project)
+		{
+			string token = BuildServerSettings.Token;
+			if (project == null || string.IsNullOrEmpty(project.TeamId) || string.IsNullOrEmpty(token))
+			{
+				Debug.LogWarning("[New Definition] No ProjectConfig team / server token to fetch the team's provider " +
+					"coordinates from - provisioning with LOCAL DEFAULT coordinates instead of the team's.");
+				return SecretProviders.ForBuild();
+			}
+
+			try
+			{
+				TeamCityClient.ProviderCoords coords = WizardShell.RunSync(() => FetchTeamCoordsAsync(project, token));
+				ISecretProvider provider = SecretProviders.Resolve(coords.Scheme, coords.Config, coords.Account);
+				if (provider != null) return provider;
+
+				Debug.LogWarning("[New Definition] Team '" + project.TeamId + "' declares no known provider (scheme '" +
+					coords.Scheme + "') - provisioning with LOCAL DEFAULT coordinates instead of the team's.");
+			}
+			catch (Exception exception)
+			{
+				Debug.LogWarning("[New Definition] Could not fetch team provider coordinates (" + exception.Message +
+					") - provisioning with LOCAL DEFAULT coordinates instead of the team's.");
+			}
+
+			return SecretProviders.ForBuild();
+		}
+
+		private static async Task<TeamCityClient.ProviderCoords> FetchTeamCoordsAsync(ProjectConfig project, string token)
+		{
+			using (TeamCityClient client = new TeamCityClient(project.ServerBaseUrl, token))
+			{
+				return await client.GetTeamProviderCoordsAsync(project.TeamId);
+			}
+		}
+
 		private void ProvisionSecret(ISecretProvider provider, string item, string field, SecretValue value, SecretKind kind,
 			string logicalKey, string description)
 		{
-			// Scheme-correct pointer from the provider itself (no hand-assembled op:// here); replaced by the
-			// write-confirmed reference on success. Only the defensive no-provider branch names a scheme.
-			string reference = provider != null
-				? provider.ReferenceFor(item, field, kind).Reference
-				: OnePasswordProvider.SchemeName + "://" + OnePasswordProvider.DefaultVault + "/" + item + "/" + field;
-
-			if (provider != null)
+			if (provider == null)
 			{
-				try
-				{
-					SecretRef created = WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
-					if (!string.IsNullOrEmpty(created.Reference)) reference = created.Reference;
-				}
-				catch (Exception exception)
-				{
-					Debug.LogWarning("[New Definition] Secret provider could not store '" + item + "/" + field +
-						"' (" + exception.Message + "). Recording the reference only - create the secret manually (TODO).");
-				}
+				// No provider = no scheme to even build a reference in; registering a fabricated pointer would
+				// commit a lie, so fail loudly instead of degrading.
+				Debug.LogError("[New Definition] Cannot provision secret '" + item + "/" + field + "' (" + description +
+					"): no secret provider is resolvable. Provider coordinates (scheme/config/account) come from the " +
+					"team's TeamCity project params (unitybuild.provider.*) or, locally, the UNITYBUILD_PROVIDER_* " +
+					"environment - none yielded a known provider. Fix the team params (or set the environment) and " +
+					"re-run the wizard's signing step.");
+				return;
+			}
+
+			// Scheme-correct pointer from the provider itself (never hand-assembled); replaced by the
+			// write-confirmed reference on success.
+			string reference = provider.ReferenceFor(item, field, kind).Reference;
+
+			try
+			{
+				SecretRef created = WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
+				if (!string.IsNullOrEmpty(created.Reference)) reference = created.Reference;
+			}
+			catch (Exception exception)
+			{
+				Debug.LogWarning("[New Definition] Secret provider could not store '" + item + "/" + field +
+					"' (" + exception.Message + "). Recording the reference only - create the secret manually (TODO).");
 			}
 
 			RegisterSecret(logicalKey, description, kind, reference);
@@ -477,7 +527,8 @@ namespace Ateo.Build
 				Debug.Log("[New Definition] git branch enumeration failed (" + exception.Message + ") - using a free-text branch field.");
 			}
 
-			if (string.IsNullOrEmpty(_defaultBranch)) _defaultBranch = _gitOk ? _defaultBranch : "main";
+			// Pre-fill "main" only for the free-text fallback (git failed); real defaulting happens in ApplySharedFields.
+			if (string.IsNullOrEmpty(_defaultBranch) && !_gitOk) _defaultBranch = "main";
 		}
 
 		private IEnumerable<string> BranchOptions()

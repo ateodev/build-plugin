@@ -401,8 +401,6 @@ namespace Ateo.Build
 						List<BuildStatus> builds = await client.ListBuildsAsync(executor, projectKey, _definition.DefinitionName, 10);
 						foreach (BuildStatus build in builds)
 						{
-							if (build.Definition != null && build.Definition != _definition.DefinitionName) continue;
-
 							BuildRow row = new BuildRow
 							{
 								Title = IdentityLabel(build),
@@ -502,7 +500,8 @@ namespace Ateo.Build
 					}
 				}
 
-				_owner.SetStatus("Downloaded build #" + row.Number + " -> " + destDir);
+				// Label by identity (the list row's label), not the TeamCity #number - users think in versions.
+				_owner.SetStatus("Downloaded build " + row.Title + " -> " + destDir);
 				Refresh(_owner);
 			}
 		}
@@ -577,6 +576,20 @@ namespace Ateo.Build
 
 			using (TeamCityClient client = _owner.NewClient())
 			{
+				// §5.6 idempotency: an impatient re-click of the identical trigger (same executor, project,
+				// definition and ref) must not stack a second queue entry.
+				properties.TryGetValue("unitybuild.vcs.ref", out string vcsRef);
+				BuildStatus duplicate = await client.FindInFlightDuplicateAsync(
+					executor, properties["unitybuild.project"], _definition.DefinitionName, vcsRef);
+				if (duplicate != null)
+				{
+					string label = !string.IsNullOrEmpty(duplicate.Number) ? "#" + duplicate.Number : "id " + duplicate.Id;
+					_owner.SetStatus("Already " + (duplicate.IsRunning ? "running" : "queued") + " as " + label +
+						" - trigger skipped.");
+					await LoadBuildsAsync(_owner);
+					return;
+				}
+
 				long id = await client.TriggerBuildAsync(executor, properties);
 				_owner.SetStatus("Queued build " + id + " for '" + _definition.DefinitionName + "'.");
 				await LoadBuildsAsync(_owner);
@@ -711,7 +724,12 @@ namespace Ateo.Build
 			if (build.IsQueued) return "queued #" + build.Number;
 			// StatusText is the human-readable form ("Success" / "Tests failed: ..."); Status is the enum token
 			// ("SUCCESS") - showing both gave "SUCCESS  Success". Prefer the readable one, fall back to the token.
-			return !string.IsNullOrEmpty(build.StatusText) ? build.StatusText : build.Status;
+			if (!string.IsNullOrEmpty(build.StatusText)) return build.StatusText;
+			// A canceled build (visible since the history includes state:any) reports UNKNOWN and often no
+			// statusText - show something a user can read instead of a bare token or an empty cell.
+			if (string.IsNullOrEmpty(build.Status) || build.Status == "UNKNOWN") return "canceled";
+
+			return build.Status;
 		}
 
 		#endregion

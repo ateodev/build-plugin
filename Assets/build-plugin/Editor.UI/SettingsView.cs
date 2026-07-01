@@ -8,8 +8,8 @@ namespace Ateo.Build
 {
 	/// <summary>
 	/// The project-level Settings pane (§12.6), reached from the top menu bar. Edits the per-user connection
-	/// (access token + manual executor fallback, stored in <see cref="BuildServerSettings"/>) and, inline, the
-	/// committed <see cref="ProjectConfig"/> (server URL, team, Slack channel, provider config, secret registry).
+	/// (the access token, stored in <see cref="BuildServerSettings"/>) and, inline, the committed
+	/// <see cref="ProjectConfig"/> (server URL, team, Slack channel, secret registry).
 	/// </summary>
 	internal sealed class SettingsView : IPanelView
 	{
@@ -44,9 +44,12 @@ namespace Ateo.Build
 
 			SirenixEditorGUI.BeginBox("Connection (this machine only)");
 			{
-				BuildServerSettings.Token = EditorGUILayout.PasswordField(
+				// Only write the EditorPrefs-backed token on an actual edit, not on every repaint.
+				EditorGUI.BeginChangeCheck();
+				string token = EditorGUILayout.PasswordField(
 					new GUIContent("Access token", "Your permission-scoped TeamCity token. Never an admin token, never committed."),
 					BuildServerSettings.Token);
+				if (EditorGUI.EndChangeCheck()) BuildServerSettings.Token = token;
 
 				if (GUILayout.Button("Test Connection")) _owner.RunAsync(TestConnectionAsync());
 			}
@@ -57,8 +60,10 @@ namespace Ateo.Build
 			if (_project == null)
 			{
 				SirenixEditorGUI.MessageBox(
-					"No ProjectConfig asset found. The project-setup wizard (P2.D) is not built yet - create one via " +
-					"Create > Build > Project Config under Assets/BuildConfigs/.", MessageType.Warning);
+					"No ProjectConfig asset found - this project hasn't been onboarded yet. Run the Project Setup " +
+					"Wizard to create one.", MessageType.Warning);
+
+				if (GUILayout.Button("Open Project Setup Wizard")) ProjectSetupWizard.Open(_owner);
 			}
 		}
 

@@ -24,9 +24,11 @@ namespace Ateo.Build
 		/// <summary>Env var that overrides the <c>op.exe</c> location.</summary>
 		public const string CliPathEnvVar = "OP_CLI_PATH";
 
-		/// <summary>Default winget install location of <c>op.exe</c> on the build server (not on PATH).</summary>
-		public const string DefaultCliPath =
-			@"C:\Users\Server\AppData\Local\Microsoft\WinGet\Packages\AgileBits.1Password.CLI_Microsoft.Winget.Source_8wekyb3d8bbwe\op.exe";
+		/// <summary>Default winget install location of <c>op.exe</c> (per-user, not on PATH) - anchored to the
+		/// current user's local app-data root so it resolves on any machine, not just the build server.</summary>
+		public static readonly string DefaultCliPath = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+			@"Microsoft\WinGet\Packages\AgileBits.1Password.CLI_Microsoft.Winget.Source_8wekyb3d8bbwe\op.exe");
 
 		#endregion
 
@@ -93,6 +95,12 @@ namespace Ateo.Build
 			return result.ExitCode == 0 && result.StdOut.Length > 0;
 		}
 
+		public async Task<bool> ItemExistsAsync(string vault, string item, string account)
+		{
+			OpResult result = await RunAsync(new[] { "item", "get", item, "--vault", vault, "--format", "json" }, account);
+			return result.ExitCode == 0;
+		}
+
 		public async Task<IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account)
 		{
 			OpResult result = await RunAsync(new[] { "item", "get", item, "--vault", vault, "--format", "json" }, account);
@@ -143,12 +151,6 @@ namespace Ateo.Build
 
 		#region Private Methods
 
-		private async Task<bool> ItemExistsAsync(string vault, string item, string account)
-		{
-			OpResult result = await RunAsync(new[] { "item", "get", item, "--vault", vault, "--format", "json" }, account);
-			return result.ExitCode == 0;
-		}
-
 		private async Task CreateOrEditDocumentAsync(string vault, string item, byte[] bytes, string account)
 		{
 			// op handles documents by file path, so stage the bytes to a transient file and wipe it afterward.
@@ -157,10 +159,12 @@ namespace Ateo.Build
 			{
 				File.WriteAllBytes(tempFile, bytes);
 
+				// --file-name pins the stored document's internal file name to the item name; without it, op would
+				// persist the random staging name above as the document's file name.
 				bool exists = await ItemExistsAsync(vault, item, account);
 				OpResult result = exists
-					? await RunAsync(new[] { "document", "edit", item, tempFile, "--vault", vault }, account)
-					: await RunAsync(new[] { "document", "create", tempFile, "--title", item, "--vault", vault }, account);
+					? await RunAsync(new[] { "document", "edit", item, tempFile, "--vault", vault, "--file-name", item }, account)
+					: await RunAsync(new[] { "document", "create", tempFile, "--title", item, "--vault", vault, "--file-name", item }, account);
 
 				if (result.ExitCode != 0) throw OpFailure(exists ? "document edit" : "document create", result);
 			}

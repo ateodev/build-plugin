@@ -103,6 +103,28 @@ namespace Ateo.Build
 			return path;
 		}
 
+		/// <summary>
+		/// Best-effort wipe of every File secret materialized by <see cref="GetSecretFilePath"/>: deletes the
+		/// transient temp files and clears the cache, so key material does not outlive the run. Per-file IO errors
+		/// are swallowed - a still-locked file must not fail the build's teardown.
+		/// </summary>
+		public void WipeMaterializedSecrets()
+		{
+			foreach (KeyValuePair<string, string> entry in _materializedSecretFiles)
+			{
+				try
+				{
+					if (File.Exists(entry.Value)) File.Delete(entry.Value);
+				}
+				catch (Exception)
+				{
+					// Best-effort: leave the file for OS temp cleanup rather than fail teardown.
+				}
+			}
+
+			_materializedSecretFiles.Clear();
+		}
+
 		#endregion
 
 		#region Private Methods

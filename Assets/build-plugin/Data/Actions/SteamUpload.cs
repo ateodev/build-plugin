@@ -84,6 +84,9 @@ namespace Ateo.Build
 			string pass = ctx.GetSecretString(SteamPassKey);
 			string totp = ctx.GetSecretString(SteamTotpKey);
 
+			// CONSTRAINT: steamcmd's only non-interactive login is '+login user pass totp' on argv - it has no env
+			// var or credential-file alternative, so the credentials unavoidably appear in the process list for the
+			// upload's duration. Mitigate with a dedicated low-privilege Steam build account, not code.
 			List<string> args = new List<string>
 			{
 				"+login", user, pass, totp,

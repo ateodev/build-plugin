@@ -19,6 +19,10 @@ namespace Ateo.Build
 	{
 		#region Fields
 
+		// Characters TeamCity's locator grammar treats specially; a property value containing one must be
+		// base64-wrapped or it corrupts the whole locator (definition/project names are free text).
+		private static readonly char[] LocatorReserved = { '(', ')', ',', ':', '$' };
+
 		private readonly string _baseUrl;
 		private readonly HttpClient _http;
 
@@ -70,9 +74,12 @@ namespace Ateo.Build
 		/// definition - so a definition's history shows ITS builds, not every build the shared executor ran.</summary>
 		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string projectKey, string definitionName, int count = 20)
 		{
-			string locator = "buildType:(id:" + buildTypeId + ")";
-			if (!string.IsNullOrEmpty(projectKey)) locator += ",property:(name:unitybuild.project,value:" + projectKey + ")";
-			if (!string.IsNullOrEmpty(definitionName)) locator += ",property:(name:unitybuild.definition,value:" + definitionName + ")";
+			// defaultFilter:false + state:any: the default build locator returns only FINISHED builds on the
+			// default branch - a just-triggered queued/running build (and canceled history) would be invisible
+			// and the panel's focused poll would never engage.
+			string locator = "buildType:(id:" + buildTypeId + "),defaultFilter:false,state:any";
+			if (!string.IsNullOrEmpty(projectKey)) locator += ",property:(name:unitybuild.project,value:" + LocatorValue(projectKey) + ")";
+			if (!string.IsNullOrEmpty(definitionName)) locator += ",property:(name:unitybuild.definition,value:" + LocatorValue(definitionName) + ")";
 			locator += ",count:" + count;
 
 			string json = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(locator) +
@@ -98,10 +105,8 @@ namespace Ateo.Build
 		public async Task<List<BuildStatus>> ListInFlightAsync()
 		{
 			List<BuildStatus> result = new List<BuildStatus>();
+			(BuildListDto queue, BuildListDto running) = await FetchInFlightAsync();
 
-			string queueJson = await GetAsync("/app/rest/buildQueue?fields=" + Uri.EscapeDataString(
-				"build(id,number,state,statusText,buildTypeId,properties(property(name,value)))"));
-			BuildListDto queue = JsonUtility.FromJson<BuildListDto>(queueJson);
 			if (queue != null && queue.build != null)
 			{
 				int position = 1;
@@ -113,18 +118,26 @@ namespace Ateo.Build
 				}
 			}
 
-			string runningLocator = "state:running,defaultFilter:false,count:50";
-			string runningJson = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(runningLocator) +
-				"&fields=" + Uri.EscapeDataString(
-					"build(id,number,state,status,statusText,percentageComplete,webUrl,buildTypeId," +
-					"agent(name),properties(property(name,value)))"));
-			BuildListDto running = JsonUtility.FromJson<BuildListDto>(runningJson);
 			if (running != null && running.build != null)
 			{
 				foreach (BuildDto dto in running.build) result.Add(ToStatus(dto));
 			}
 
 			return result;
+		}
+
+		/// <summary>
+		/// The first queued/running build identical to a would-be trigger (same executor, project, definition
+		/// AND vcs ref), or null (§5.6 idempotency - the panel skips the POST instead of stacking a duplicate).
+		/// Compared on the raw trigger properties here because <see cref="BuildStatus"/> does not carry the ref.
+		/// </summary>
+		public async Task<BuildStatus> FindInFlightDuplicateAsync(string buildTypeId, string projectKey,
+			string definitionName, string vcsRef)
+		{
+			(BuildListDto queue, BuildListDto running) = await FetchInFlightAsync();
+
+			return FindDuplicate(queue, buildTypeId, projectKey, definitionName, vcsRef)
+				?? FindDuplicate(running, buildTypeId, projectKey, definitionName, vcsRef);
 		}
 
 		/// <summary>
@@ -262,13 +275,34 @@ namespace Ateo.Build
 			return coords;
 		}
 
-		/// <summary>Download one artifact to a local file.</summary>
+		/// <summary>Download one artifact to a local file. Streams the response straight to disk so a
+		/// multi-GB artifact neither buffers fully in memory nor stalls the editor while it accumulates.</summary>
 		public async Task DownloadArtifactAsync(long id, string artifactPath, string destinationFile)
 		{
-			string url = _baseUrl + "/app/rest/builds/id:" + id + "/artifacts/content/" + artifactPath;
-			byte[] bytes = await _http.GetByteArrayAsync(url);
-			Directory.CreateDirectory(Path.GetDirectoryName(destinationFile));
-			File.WriteAllBytes(destinationFile, bytes);
+			// Escape per segment: artifact names are arbitrary ('#', '+', spaces), but '/' separators must
+			// survive as path structure.
+			string[] segments = (artifactPath ?? "").Split('/');
+			for (int i = 0; i < segments.Length; i++)
+			{
+				segments[i] = Uri.EscapeDataString(segments[i]);
+			}
+
+			string url = _baseUrl + "/app/rest/builds/id:" + id + "/artifacts/content/" + string.Join("/", segments);
+			using (HttpResponseMessage response = await _http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+			{
+				if (!response.IsSuccessStatusCode)
+				{
+					string json = await response.Content.ReadAsStringAsync();
+					throw new Exception("DownloadArtifact failed (" + (int)response.StatusCode + "): " + Trim(json));
+				}
+
+				Directory.CreateDirectory(Path.GetDirectoryName(destinationFile));
+				using (Stream source = await response.Content.ReadAsStreamAsync())
+				using (FileStream destination = new FileStream(destinationFile, FileMode.Create, FileAccess.Write, FileShare.None))
+				{
+					await source.CopyToAsync(destination);
+				}
+			}
 		}
 
 		public void Dispose()
@@ -287,6 +321,62 @@ namespace Ateo.Build
 		#endregion
 
 		#region Private Methods
+
+		/// <summary>The two in-flight sources: the build queue (ordered) and everything currently running.</summary>
+		private async Task<(BuildListDto Queue, BuildListDto Running)> FetchInFlightAsync()
+		{
+			string queueJson = await GetAsync("/app/rest/buildQueue?fields=" + Uri.EscapeDataString(
+				"build(id,number,state,statusText,buildTypeId,properties(property(name,value)))"));
+			BuildListDto queue = JsonUtility.FromJson<BuildListDto>(queueJson);
+
+			string runningLocator = "state:running,defaultFilter:false,count:50";
+			string runningJson = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(runningLocator) +
+				"&fields=" + Uri.EscapeDataString(
+					"build(id,number,state,status,statusText,percentageComplete,webUrl,buildTypeId," +
+					"agent(name),properties(property(name,value)))"));
+			BuildListDto running = JsonUtility.FromJson<BuildListDto>(runningJson);
+
+			return (queue, running);
+		}
+
+		private static BuildStatus FindDuplicate(BuildListDto list, string buildTypeId, string projectKey,
+			string definitionName, string vcsRef)
+		{
+			if (list == null || list.build == null) return null;
+
+			foreach (BuildDto dto in list.build)
+			{
+				if (dto.buildTypeId != buildTypeId) continue;
+				if (!PropertyEquals(dto, "unitybuild.project", projectKey)) continue;
+				if (!PropertyEquals(dto, "unitybuild.definition", definitionName)) continue;
+				if (!PropertyEquals(dto, "unitybuild.vcs.ref", vcsRef)) continue;
+
+				return ToStatus(dto);
+			}
+
+			return null;
+		}
+
+		private static bool PropertyEquals(BuildDto dto, string name, string expected)
+		{
+			string actual = FindProperty(dto.properties, name);
+			// A build triggered without the property only matches an equally empty expectation (default-ref
+			// trigger != explicit-changeset trigger).
+			if (string.IsNullOrEmpty(expected)) return string.IsNullOrEmpty(actual);
+
+			return actual == expected;
+		}
+
+		/// <summary>A property-locator value: verbatim when safe, else TeamCity's <c>($base64:...)</c> form
+		/// (URL-safe alphabet, padding optional - verified against the live server).</summary>
+		private static string LocatorValue(string value)
+		{
+			if (value.IndexOfAny(LocatorReserved) < 0) return value;
+
+			string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(value))
+				.TrimEnd('=').Replace('+', '-').Replace('/', '_');
+			return "($base64:" + encoded + ")";
+		}
 
 		private async Task<string> GetAsync(string path)
 		{

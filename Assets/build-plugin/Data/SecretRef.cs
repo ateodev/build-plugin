@@ -13,7 +13,8 @@ namespace Ateo.Build
 	{
 		#region Fields
 
-		/// <summary>The scheme-tagged reference, e.g. "op://vault/item/field".</summary>
+		/// <summary>The scheme-tagged reference, e.g. "op://vault/item/field" - or the field-less
+		/// "op://vault/item" form for a <see cref="SecretKind.File"/> secret stored as a document (a document has no field).</summary>
 		public string Reference;
 
 		/// <summary>The shape of the referenced secret - lets a provider route a <see cref="SecretKind.File"/> to a document read. Defaults to <see cref="SecretKind.String"/>.</summary>

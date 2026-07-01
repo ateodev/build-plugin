@@ -345,6 +345,22 @@ namespace Ateo.Build
 			ExecContext execContext = context.IsBatchMode ? ExecContext.Server : ExecContext.Local;
 			Action<string> log = context.Log ?? (message => Debug.Log("[Build] " + message));
 
+			try
+			{
+				RunActions(context, definition, actions, available, skip, here, execContext, log, result);
+			}
+			finally
+			{
+				// Secrets are materialized just-in-time for the pipeline; scrub them however it ended so
+				// nothing sensitive outlives the run (on disk or in the context).
+				context.WipeMaterializedSecrets();
+			}
+		}
+
+		private static void RunActions(BuildContext context, BuildDefinition definition,
+			IReadOnlyList<PostBuildAction> actions, HashSet<ArtifactKind> available, HashSet<string> skip,
+			RunLocation here, ExecContext execContext, Action<string> log, BuildResult result)
+		{
 			foreach (PostBuildAction action in actions)
 			{
 				if (action == null) continue;
@@ -452,12 +468,12 @@ namespace Ateo.Build
 				if (declaration == null)
 				{
 					throw new Exception("action '" + action.DisplayName + "' requires secret '" + key +
-						"' but it has no entry in the project secret registry - add an op:// reference for '" + key +
+						"' but it has no entry in the project secret registry - add a provider reference for '" + key +
 						"' in ProjectConfig.");
 				}
 
 				SecretRef secretRef = declaration.Ref;
-				ISecretProvider provider = ResolveSecretProvider(secretRef.Scheme, context.Project);
+				ISecretProvider provider = ResolveSecretProvider(secretRef.Scheme);
 				if (provider == null)
 				{
 					throw new Exception("action '" + action.DisplayName + "': no secret provider is registered for scheme '" +
@@ -483,7 +499,7 @@ namespace Ateo.Build
 		/// The scheme -> provider registry. Minimal for now (only 1Password / "op"); a second provider (OpenBao,
 		/// §11.4) slots in here behind the same <see cref="ISecretProvider"/> seam. Returns null for an unknown scheme.
 		/// </summary>
-		private static ISecretProvider ResolveSecretProvider(string scheme, ProjectConfig project)
+		private static ISecretProvider ResolveSecretProvider(string scheme)
 		{
 			// Coordinates come from the build environment (server) / defaults (local), not ProjectConfig (§11.7).
 			return SecretProviders.ResolveWithBuildCoords(scheme);

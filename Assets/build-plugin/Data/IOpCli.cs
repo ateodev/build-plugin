@@ -22,6 +22,10 @@ namespace Ateo.Build
 		/// <summary>Whether the given field exists on the given item in the given vault (backs presence checks).</summary>
 		Task<bool> ItemFieldExistsAsync(string vault, string item, string field, string account);
 
+		/// <summary>Whether the item exists at all in the given vault - backs presence checks for field-less
+		/// document references (a document has no field to probe).</summary>
+		Task<bool> ItemExistsAsync(string vault, string item, string account);
+
 		/// <summary>Read every field (label -&gt; value) of an item - backs <see cref="ISecretProvider.ReadRecordAsync"/> (the <c>vcs-</c> record).</summary>
 		Task<IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account);
 

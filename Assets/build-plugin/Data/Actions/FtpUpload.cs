@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -78,30 +79,50 @@ namespace Ateo.Build
 
 			ctx.Log?.Invoke("FtpUpload: curl upload of " + files.Length + " file(s) -> " + baseUrl);
 
+			// curl --user would put the password on the process command line (readable machine-wide); a transient
+			// netrc file keeps the credentials off argv for every per-file invocation.
+			string netrcPath = Path.Combine(Path.GetTempPath(), "ateo-netrc-" + Guid.NewGuid().ToString("N"));
 			int uploaded = 0;
-			foreach (string file in files)
+			try
 			{
-				string relative = file.Substring(buildDir.Length).TrimStart('/', '\\').Replace('\\', '/');
-				string remoteUrl = baseUrl + relative;
+				string machine = new Uri(baseUrl).Host;
+				File.WriteAllText(netrcPath, "machine " + machine + " login " + user + " password " + pass + "\n");
 
-				List<string> args = new List<string>
+				foreach (string file in files)
 				{
-					"--fail",
-					"--silent",
-					"--show-error",
-					"--ftp-create-dirs",
-					"--user", user + ":" + pass,
-					"--upload-file", file,
-					remoteUrl
-				};
+					string relative = file.Substring(buildDir.Length).TrimStart('/', '\\').Replace('\\', '/');
+					string remoteUrl = baseUrl + relative;
 
-				ActionProcess.ToolResult result = await ActionProcess.RunAsync("curl", args, buildDir);
-				if (!result.Succeeded)
-				{
-					return ActionResult.Fail("FtpUpload: curl failed for '" + relative + "' (exit " + result.ExitCode + "): " + result.Tail(15));
+					List<string> args = new List<string>
+					{
+						"--fail",
+						"--silent",
+						"--show-error",
+						"--ftp-create-dirs",
+						"--netrc-file", netrcPath,
+						"--upload-file", file,
+						remoteUrl
+					};
+
+					ActionProcess.ToolResult result = await ActionProcess.RunAsync("curl", args, buildDir);
+					if (!result.Succeeded)
+					{
+						return ActionResult.Fail("FtpUpload: curl failed for '" + relative + "' (exit " + result.ExitCode + "): " + result.Tail(15));
+					}
+
+					uploaded++;
 				}
-
-				uploaded++;
+			}
+			finally
+			{
+				try
+				{
+					if (File.Exists(netrcPath)) File.Delete(netrcPath);
+				}
+				catch (Exception)
+				{
+					// Best-effort wipe; a leftover netrc in temp is non-fatal.
+				}
 			}
 
 			ActionResult ok = ActionResult.Ok("uploaded " + uploaded + " file(s) to " + baseUrl);

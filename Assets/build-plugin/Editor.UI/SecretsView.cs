@@ -125,13 +125,13 @@ namespace Ateo.Build
 			{
 				if (declaration == null || string.IsNullOrEmpty(declaration.LogicalKey)) continue;
 
-				_serverPresence[declaration.LogicalKey] = await ProbeAsync(declaration, _project);
+				_serverPresence[declaration.LogicalKey] = await ProbeAsync(declaration);
 			}
 		}
 
-		private static async Task<string> ProbeAsync(SecretDeclaration declaration, ProjectConfig project)
+		private static async Task<string> ProbeAsync(SecretDeclaration declaration)
 		{
-			ISecretProvider provider = ProviderFor(declaration.Ref.Scheme, project);
+			ISecretProvider provider = ProviderFor(declaration.Ref.Scheme);
 			if (provider == null || !provider.Caps.Presence) return "unknown";
 
 			try
@@ -146,7 +146,7 @@ namespace Ateo.Build
 			}
 		}
 
-		private static ISecretProvider ProviderFor(string scheme, ProjectConfig project)
+		private static ISecretProvider ProviderFor(string scheme)
 		{
 			// Coordinates from the build environment / defaults, not ProjectConfig (§11.7).
 			return SecretProviders.ResolveWithBuildCoords(scheme);

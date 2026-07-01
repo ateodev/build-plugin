@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0] - 2026-07-02
+### Fixed (debt sprint - full-project review follow-up)
+- **File secrets round-trip**: `CreateOrUpdateAsync(File)` stored a 1Password document but returned a field-style `op://vault/item/field` reference that could never be read back (and `ExistsAsync` reported it absent). File secrets now use the field-less document reference `op://<vault>/<item>` end-to-end (create, resolve, exists), matching the agent-side convention; stored documents no longer leak the random staging file name.
+- **Live builds were invisible in the Builds list**: TeamCity's default build locator returns finished, default-branch builds only, so a just-triggered (queued/running) build never appeared and the focused poll never engaged. The history locator now sends `defaultFilter:false,state:any`.
+- **Locator + artifact-URL escaping**: free-text definition names containing `( ) , :` corrupted the REST locator (server error); values are now `$base64`-wrapped when needed. Artifact download paths are URL-escaped per segment, and downloads stream to disk instead of buffering whole artifacts in editor memory.
+- **Trigger dedupe (5.6)**: "Build on Server" now checks the in-flight queue for an identical (project, definition, ref) build and skips the duplicate POST ("already queued as #N").
+- **Secret hygiene**: materialized file secrets (`%TEMP%/ateo-secret-*`) are wiped after the post-build-action pipeline; `ServerDeploy` restricts the SSH key file (icacls/chmod 600) so OpenSSH accepts it; `FtpUpload` passes credentials via a transient netrc file instead of argv; `steamcmd`/BuildPatchTool argv constraints documented in place.
+- **Provider-agnosticism sweep completed**: the create-definition wizard no longer hand-builds an `op://` reference in its no-provider fallback (fails loudly instead) and provisions secrets with the TEAM's provider coordinates (fetched from TeamCity team params like the setup wizard) instead of local defaults; remaining 1Password wording removed from agnostic messages.
+- `OpCli` default path derived from `%LOCALAPPDATA%` (was hardcoded to this build server's user profile - broke on dev machines).
+- External tools launched by post-build actions now time out (default 120 min) instead of hanging a build forever.
+- Settings view: stale "wizard not built yet" guidance replaced (opens the Project Setup Wizard); the TeamCity token is only written to EditorPrefs on an actual edit.
+- Download status line labels builds by identity (version/build name), not the TeamCity #number.
+
+### Removed
+- Dead code: unused `OpItem`/`OpField` DTOs, a dead client-side definition re-filter, unused `project` parameters on provider-resolution helpers. (The `BuildStep` pre/post framework stays - it becomes the `IPreprocessBuildWithReport`/`IPostprocessBuildWithReport` hook mechanism, design pending.)
+
+### Docs
+- README rewritten for the v2 package (install with `?path=`, wizard-first onboarding, concepts, CI entry point, release process).
+
 ## [0.7.4] - 2026-07-01
 ### Fixed
 - **A definition's Builds list now shows only ITS builds** — it was filtered by project only, so a shared executor's builds from *other* definitions appeared (a brand-new definition showed 10 unrelated builds). Now filtered by `unitybuild.definition` too.
@@ -126,6 +145,10 @@ v2 — the plugin-driven re-architecture. **Breaking:** the data model is now po
 - Build number is the committed `PlayerSettings` value (no CI counter).
 - `BuildStep` (pre/post) is superseded by the `PostBuildAction` pipeline.
 
+## [0.1.1] - 2026-06-27
+### Fixed
+- Build Panel: Refresh Builds queried an empty buildTypeId when no manual executor was set; now queries the auto-discovered executors (+ manual fallback).
+
 ## [0.1.0] - 2026-06-27
 v1 skeleton.
 
@@ -142,7 +165,3 @@ v1 skeleton.
 - Building *from* a Unity 6 Build Profile (the built-in path currently uses the scene list).
 - In-Editor Build Panel and built-in `BuildStep` implementations (v2).
 - iOS / standalone output-path specifics beyond Android AAB/APK.
-
-## [0.1.1] - 2026-06-27
-### Fixed
-- Build Panel: Refresh Builds queried an empty buildTypeId when no manual executor was set; now queries the auto-discovered executors (+ manual fallback).

@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -70,6 +72,18 @@ namespace Ateo.Build
 
 			string keyPath = ctx.GetSecretFilePath(SshKeyKey);
 			string[] sshOpts = { "-i", keyPath, "-o", "StrictHostKeyChecking=no" };
+
+			// OpenSSH refuses a group/world-readable private key, and the materialized temp file carries the
+			// default (inherited) permissions - restrict it to the current user first (mirrors the agent-side
+			// checkout-key handling).
+			ActionProcess.ToolResult restrict = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+				? await ActionProcess.RunAsync("icacls",
+					new[] { keyPath, "/inheritance:r", "/grant:r", Environment.UserName + ":R" }, buildDir)
+				: await ActionProcess.RunAsync("chmod", new[] { "600", keyPath }, buildDir);
+			if (!restrict.Succeeded)
+			{
+				return ActionResult.Fail("ServerDeploy: failed to restrict SSH key file permissions (exit " + restrict.ExitCode + "): " + restrict.Tail(10));
+			}
 
 			// 1) Stop the service.
 			ctx.Log?.Invoke("ServerDeploy: ssh systemctl stop " + _serviceName);
