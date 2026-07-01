@@ -45,6 +45,7 @@ namespace Ateo.Build
 		[NonSerialized] private BuildPanel _owner;
 		[NonSerialized] private string _validation = "";
 		[NonSerialized] private string _publicKey = "";
+		[NonSerialized] private byte[] _privateKey;   // kept in memory for the session so 'Verify' can test-clone without re-touching disk
 		[NonSerialized] private List<string> _licenses = new List<string> { "ateo" };
 
 		// --- Identity -----------------------------------------------------------------------------------------
@@ -222,8 +223,9 @@ namespace Ateo.Build
 				_publicKeyDisplay = _publicKey;
 
 				byte[] privateKey = File.ReadAllBytes(temp);
+				_privateKey = privateKey;
 				Provision(name, "private_key", SecretValue.OfFile(privateKey), SecretKind.File, name + " checkout private key");
-				_validation = "Keypair generated. Add the public key above to your repo host as a deploy key.";
+				_validation = "Keypair generated. " + HostGuidance() + " Then hit 'Verify deploy key'.";
 			}
 			catch (Exception exception)
 			{
@@ -236,6 +238,52 @@ namespace Ateo.Build
 				TryDelete(temp + ".pub");
 			}
 		}
+
+		// Host-capability registry (#29): which repo hosts take a read-only SSH deploy/access key and how to add it.
+		// Powers the guidance shown after key generation and on a failed Verify - so the dev never has to hunt for it.
+		private static readonly (string Match, string Name, string Guidance)[] HostRegistry =
+		{
+			("github.com",    "GitHub",    "GitHub: repo Settings -> Deploy keys -> Add deploy key. Paste the public key; leave 'Allow write access' OFF (read-only)."),
+			("gitlab.com",    "GitLab",    "GitLab: repo Settings -> Repository -> Deploy keys. Paste the public key; do NOT tick write access."),
+			("bitbucket.org", "Bitbucket", "Bitbucket: repo Settings -> Access keys -> Add key. Paste the public key (Bitbucket access keys are read-only)."),
+		};
+
+		private string HostGuidance()
+		{
+			string url = _repoUrl ?? "";
+			foreach ((string match, string _, string guidance) in HostRegistry)
+			{
+				if (url.IndexOf(match, StringComparison.OrdinalIgnoreCase) >= 0) return guidance;
+			}
+
+			return "Add the public key to your repo host as a read-only deploy/access key.";
+		}
+
+		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(HasPublicKey)), PropertyOrder(33)]
+		[InfoBox("$DeployKeyGuidance", InfoMessageType.Info)]
+		[Button("Verify deploy key")]
+		private void VerifyDeployKey()
+		{
+			if (_privateKey == null || _privateKey.Length == 0) { _validation = "Generate the keypair first."; return; }
+			if (string.IsNullOrEmpty(_repoUrl)) { _validation = "Set the repo URL first."; return; }
+
+			string keyPath = Path.Combine(Path.GetTempPath(), "ateo-verify-" + Guid.NewGuid().ToString("N"));
+			try
+			{
+				File.WriteAllBytes(keyPath, _privateKey);
+				string devNull = Application.platform == RuntimePlatform.WindowsEditor ? "NUL" : "/dev/null";
+				string sshCmd = "core.sshCommand=ssh -i \\\"" + keyPath + "\\\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=" + devNull;
+				int exit = WizardShell.Run("git", "-c \"" + sshCmd + "\" ls-remote " + Quote(_repoUrl),
+					BuildPanel.ProjectRoot, out _, out string stderr);
+				_validation = exit == 0
+					? "Deploy key VERIFIED - it can read " + _repoUrl + "."
+					: "Deploy key NOT working yet (git exit " + exit + "). " + HostGuidance();
+			}
+			catch (Exception exception) { _validation = "Verify failed to run: " + exception.Message; }
+			finally { TryDelete(keyPath); }
+		}
+
+		private string DeployKeyGuidance => HostGuidance();
 
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(ShowUvcsGenerate)), PropertyOrder(34)]
 		[Button("Show authed account")]

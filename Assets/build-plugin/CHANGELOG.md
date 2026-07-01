@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.1] - 2026-07-01
+### Added
+- **Deploy-key host guidance + Verify** (#29) — the project-setup wizard shows host-specific instructions for adding the generated key (GitHub / GitLab / Bitbucket, read-only) and a **"Verify deploy key"** button that test-clones (`git ls-remote` over SSH with the generated key) to confirm the key works before you leave the wizard. No host PAT required; auto-add via host API intentionally deferred.
+
 ## [0.6.0] - 2026-07-01
 Self-service onboarding — ProjectConfig slimmed, nothing the server owns is typed.
 
