@@ -102,7 +102,8 @@ namespace Ateo.Build
 		private string _teamId = "";
 
 		[BoxGroup("Project"), PropertyOrder(2)]
-		[SerializeField, LabelText("Server URL"), Tooltip("TeamCity base URL the panel talks to.")]
+		[OnValueChanged(nameof(FetchTeams))]
+		[SerializeField, LabelText("Server URL"), Tooltip("TeamCity base URL the panel talks to. Re-fetches the team list when changed.")]
 		private string _serverBaseUrl = "https://build.ateonet.work";
 
 		[BoxGroup("Project"), PropertyOrder(3)]

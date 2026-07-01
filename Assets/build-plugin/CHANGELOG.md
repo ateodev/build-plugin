@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.1] - 2026-07-01
+### Fixed
+- **Editing the Server URL re-fetches teams** — changing it (e.g. to `http://localhost:8111`) now reloads the team dropdown on commit, instead of leaving the list stale from the value at open.
+
 ## [0.7.0] - 2026-07-01
 ### Changed (project-setup wizard — UX sign-off pass)
 - **No secret-provider interaction on open** — the wizard no longer touches the provider (no 1Password auth prompt) when it opens. Teams are fetched from TeamCity only; the provider is first touched when you **pick a team** (coords + licenses load then).
