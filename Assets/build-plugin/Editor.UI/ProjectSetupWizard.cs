@@ -157,12 +157,20 @@ namespace Ateo.Build
 		[SerializeField, LabelText("Repo URL"), Tooltip("git remote or Plastic repo spec. Auto-detected from 'git remote get-url origin' when available.")]
 		private string _repoUrl = "";
 
+		// Existing reusable credentials (cred-* items) enumerated from the team's provider on team-select - shown
+		// WITHOUT the cred- prefix (the vcs-record's credentialName is the bare name; the agent re-applies the prefix).
+		[NonSerialized] private List<string> _existingCredentials = new List<string>();
+
+		// Defaults to AddNew (not SelectExisting): until a team's provider proves there is something to select,
+		// the toggle is hidden and select-existing would be an empty dead end. RefreshExistingCredentials enforces this.
 		[BoxGroup("Version control/Checkout credential"), PropertyOrder(22), EnumToggleButtons, HideLabel]
+		[ShowIf(nameof(HasExistingCredentials))]
 		[SerializeField, Tooltip("Reuse an existing named credential from the registry, or add a new one.")]
-		private CredentialMode _credentialMode = CredentialMode.SelectExisting;
+		private CredentialMode _credentialMode = CredentialMode.AddNew;
 
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(IsSelectExisting)), PropertyOrder(23)]
-		[SerializeField, LabelText("Credential name"), Tooltip("Name of an existing reusable checkout credential in the vault registry.")]
+		[ValueDropdown(nameof(_existingCredentials))]
+		[SerializeField, LabelText("Credential name"), Tooltip("Existing reusable checkout credentials from the vault registry (its cred-* items). The credential already exists, so no key generation or verification is needed.")]
 		private string _credentialName = "";
 
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(IsAddNew)), PropertyOrder(24)]
@@ -225,6 +233,7 @@ namespace Ateo.Build
 
 		#region Predicates (Odin ShowIf)
 
+		private bool HasExistingCredentials => _existingCredentials != null && _existingCredentials.Count > 0;
 		private bool IsSelectExisting => _credentialMode == CredentialMode.SelectExisting;
 		private bool IsAddNew => _credentialMode == CredentialMode.AddNew;
 		private bool ShowGitKey => IsAddNew && (_credentialType == CredentialType.GitDeployKey || _credentialType == CredentialType.GitSshKey);
@@ -433,6 +442,7 @@ namespace Ateo.Build
 				// The team's provider coords are now known - this is the FIRST time the wizard touches the secret
 				// provider (a 1Password auth prompt legitimately appears HERE, not on wizard open).
 				RefreshLicenses();
+				RefreshExistingCredentials();
 				Repaint();
 			}
 			catch (Exception exception) { _validation = "Coords fetch failed: " + exception.Message; Repaint(); }
@@ -537,6 +547,57 @@ namespace Ateo.Build
 			catch (Exception exception)
 			{
 				Debug.Log("[Project Setup] Could not read the unity-licenses record via provider '" + _secretProviderScheme + "' (" + exception.Message + ") - using a free-text license field.");
+				return null;
+			}
+		}
+
+		/// <summary>Fill the select-existing credential dropdown from the provider's cred-* items (the registry §13.3) - best-effort, on team-select.</summary>
+		private void RefreshExistingCredentials()
+		{
+			_existingCredentials = ReadExistingCredentialNames() ?? new List<string>();
+
+			// Nothing enumerable -> select-existing has nothing to offer: hide the toggle (via HasExistingCredentials)
+			// AND force add-new, so a previously chosen SelectExisting can't linger as an invisible dead state.
+			if (_existingCredentials.Count == 0)
+			{
+				_credentialMode = CredentialMode.AddNew;
+			}
+			else if (string.IsNullOrEmpty(_credentialName) || !_existingCredentials.Contains(_credentialName))
+			{
+				// Pre-select instead of showing blank (mirrors the license dropdown) - and drop a selection carried
+				// over from a previously chosen team, which this team's registry may not contain.
+				_credentialName = _existingCredentials[0];
+			}
+		}
+
+		/// <summary>Best-effort enumeration of the registry's reusable checkout credentials, or null when the provider can't list.</summary>
+		private List<string> ReadExistingCredentialNames()
+		{
+			try
+			{
+				// Enumerate through the provider seam (ListItems = titles by prefix), never a vault CLI directly:
+				// any provider that can enumerate fills the dropdown; one that can't returns empty and we degrade
+				// to the add-new flow (the contract says an empty list is a valid answer, not an error).
+				ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
+				if (provider == null) return null;
+
+				IReadOnlyList<string> titles = WizardShell.RunSync(() => provider.ListItemsAsync("cred-"));
+				if (titles == null) return null;
+
+				List<string> names = new List<string>();
+				foreach (string title in titles)
+				{
+					// Strip the contract's cred- item prefix: the vcs-record's credentialName is the BARE name
+					// (the agent re-applies the prefix), so the dropdown and the record must speak the same name.
+					string name = title.Substring("cred-".Length);
+					if (!string.IsNullOrEmpty(name) && !names.Contains(name)) names.Add(name);
+				}
+
+				return names;
+			}
+			catch (Exception exception)
+			{
+				Debug.Log("[Project Setup] Could not list existing credentials via provider '" + _secretProviderScheme + "' (" + exception.Message + ") - offering add-new only.");
 				return null;
 			}
 		}

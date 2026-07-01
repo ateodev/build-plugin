@@ -11,7 +11,8 @@ namespace Ateo.Build.Tests
 	/// reference, returns the resolved value, that <c>ExistsAsync</c> splits the reference into vault/item/field, that
 	/// a File-kind reference routes to <c>ReadDocumentAsync</c> (not the string read), and the File/document round-trip:
 	/// CreateOrUpdateAsync(File) returns the field-less <c>op://&lt;vault&gt;/&lt;item&gt;</c> document reference, which
-	/// resolves as a document and whose presence is checked at ITEM level. Run from CI/CLI with:
+	/// resolves as a document and whose presence is checked at ITEM level, and that <c>ListItemsAsync</c> filters
+	/// vault item titles by prefix without stripping them. Run from CI/CLI with:
 	///   Unity ... -batchmode -quit -executeMethod Ateo.Build.Tests.SecretProviderTest.RunSecretProviderTests
 	/// Exits 0 when every check passes, 1 otherwise. Mirrors PipelineSmokeTest's style (sample, not a shipped type).
 	/// </summary>
@@ -93,6 +94,17 @@ namespace Ateo.Build.Tests
 				return Task.FromResult(RecordResult);
 			}
 
+			public string LastListVault;
+			public System.Collections.Generic.IReadOnlyList<string> ListTitlesResult =
+				new System.Collections.Generic.List<string> { "cred-team-github", "cred-uvcs-ci-bot", "vcs-dungeon-clawler", "unity-licenses" };
+
+			public Task<System.Collections.Generic.IReadOnlyList<string>> ListItemTitlesAsync(string vault, string account)
+			{
+				LastListVault = vault;
+				LastReadAccount = account;
+				return Task.FromResult(ListTitlesResult);
+			}
+
 			public Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true)
 			{
 				LastCreateVault = vault;
@@ -119,6 +131,7 @@ namespace Ateo.Build.Tests
 			failures += CreateFileSecretReturnsDocumentRef();
 			failures += ResolveDocumentRef();
 			failures += ExistsChecksItemForDocumentRef();
+			failures += ListItemsFiltersByPrefix();
 
 			Debug.Log(failures == 0 ? "[SecretProviderTest] RESULT: ALL PASS" : "[SecretProviderTest] RESULT: FAILURES=" + failures);
 			if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
@@ -234,6 +247,26 @@ namespace Ateo.Build.Tests
 			failures += Check(fake.ReadDocumentCalled && !fake.ReadStringCalled, "field-less ref routed to ReadDocumentAsync");
 			failures += Check(value != null && value.IsFile && BytesEqual(value.FileBytes, doc), "document bytes returned verbatim");
 			failures += Check(fake.LastDocumentRef == "op://Build Server/cred-team", "the field-less ref is passed through unmodified");
+
+			return failures;
+		}
+
+		/// <summary>ListItemsAsync returns only the prefix-matching titles, IN FULL - the cred- prefix is NOT
+		/// stripped (stripping for display is the wizard's concern, not the provider's).</summary>
+		private static int ListItemsFiltersByPrefix()
+		{
+			int failures = 0;
+			FakeOpCli fake = new FakeOpCli();
+			OnePasswordProvider provider = new OnePasswordProvider(fake);
+
+			System.Collections.Generic.IReadOnlyList<string> items =
+				provider.ListItemsAsync("cred-").GetAwaiter().GetResult();
+
+			failures += Check(items != null && items.Count == 2, "only the prefix-matching titles are returned");
+			failures += Check(items != null && items.Count == 2 && items[0] == "cred-team-github" && items[1] == "cred-uvcs-ci-bot",
+				"titles come back in full - the prefix is not stripped");
+			failures += Check(fake.LastListVault == OnePasswordProvider.DefaultVault, "listing targets the configured vault");
+			failures += Check(fake.LastReadAccount == OnePasswordProvider.DefaultAccount, "the account shorthand is passed through");
 
 			return failures;
 		}

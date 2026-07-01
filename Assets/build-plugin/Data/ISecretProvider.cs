@@ -36,6 +36,14 @@ namespace Ateo.Build
 		/// </summary>
 		Task<IReadOnlyDictionary<string, string>> ReadRecordAsync(string item);
 
+		/// <summary>
+		/// List the TITLES of items in the provider's configured vault/config that start with
+		/// <paramref name="prefix"/> (e.g. "cred-") - backs the wizard's select-existing credential reuse (§13.3).
+		/// A provider that cannot enumerate may return an empty list (the UI then falls back to manual entry) -
+		/// do NOT throw for an empty result.
+		/// </summary>
+		Task<IReadOnlyList<string>> ListItemsAsync(string prefix);
+
 		/// <summary>Whether the referenced secret exists - backs the panel's present? columns.</summary>
 		Task<bool> ExistsAsync(SecretRef r);
 

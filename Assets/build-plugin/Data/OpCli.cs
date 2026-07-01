@@ -120,6 +120,29 @@ namespace Ateo.Build
 			return fields;
 		}
 
+		public async Task<IReadOnlyList<string>> ListItemTitlesAsync(string vault, string account)
+		{
+			OpResult result = await RunAsync(new[] { "item", "list", "--vault", vault, "--format", "json" }, account);
+			if (result.ExitCode != 0) throw OpFailure("item list", result);
+
+			// 'op item list' emits a top-level JSON ARRAY, which JsonUtility cannot parse directly - wrap it in an
+			// object so the same JsonUtility DTO pattern as GetItemFieldsAsync applies.
+			string json = "{\"items\":" + Encoding.UTF8.GetString(result.StdOut) + "}";
+			OpItemListJson parsed = JsonUtility.FromJson<OpItemListJson>(json);
+
+			List<string> titles = new List<string>();
+			if (parsed != null && parsed.items != null)
+			{
+				foreach (OpItemSummaryJson dto in parsed.items)
+				{
+					if (dto == null || string.IsNullOrEmpty(dto.title)) continue;
+					titles.Add(dto.title);
+				}
+			}
+
+			return titles;
+		}
+
 		public async Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true)
 		{
 			if (value == null) throw new ArgumentNullException(nameof(value));
@@ -298,6 +321,10 @@ namespace Ateo.Build
 
 		[Serializable] private sealed class OpItemJson { public OpFieldJson[] fields; }
 		[Serializable] private sealed class OpFieldJson { public string label; public string value; }
+
+		// 'op item list' array entries, wrapped for JsonUtility (see ListItemTitlesAsync) - only the title matters.
+		[Serializable] private sealed class OpItemListJson { public OpItemSummaryJson[] items; }
+		[Serializable] private sealed class OpItemSummaryJson { public string title; }
 
 		/// <summary>Captured result of one <c>op</c> invocation.</summary>
 		private readonly struct OpResult

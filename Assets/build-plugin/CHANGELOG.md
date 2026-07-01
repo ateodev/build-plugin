@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.8.2] - 2026-07-02
+### Added
+- **Select an existing checkout credential** (13.3): the project-setup wizard now lists the team vault's existing `cred-*` items in a dropdown (names shown without the prefix) next to "add new" - reusing a credential skips key generation/paste/verify entirely. Backed by a new provider verb `ListItemsAsync(prefix)` on `ISecretProvider` (op impl via `op item list`; an empty result just hides the select-existing mode).
+
 ## [0.8.1] - 2026-07-02
 ### Fixed
 - **A definition's Default Branch is now actually sent** — triggering a server build only sent `unitybuild.vcs.ref` when the manual Changeset override was typed, so the definition's own branch was silently ignored (empty always meant "repo default"). The trigger now sends the definition's Default Branch (with `refType: branch`) when no override is given.

@@ -100,6 +100,24 @@ namespace Ateo.Build
 			return _op.GetItemFieldsAsync(_vault, item, _account);
 		}
 
+		public async Task<IReadOnlyList<string>> ListItemsAsync(string prefix)
+		{
+			IReadOnlyList<string> titles = await _op.ListItemTitlesAsync(_vault, _account);
+
+			// Prefix filtering happens HERE, not in the CLI seam: 'op item list' has no server-side filter, and
+			// keeping the seam a 1:1 mirror of op commands keeps fakes trivial.
+			List<string> matches = new List<string>();
+			foreach (string title in titles)
+			{
+				if (!string.IsNullOrEmpty(title) && title.StartsWith(prefix ?? string.Empty, StringComparison.Ordinal))
+				{
+					matches.Add(title);
+				}
+			}
+
+			return matches;
+		}
+
 		public Task<bool> ExistsAsync(SecretRef r)
 		{
 			string reference = RequireOpReference(r);
