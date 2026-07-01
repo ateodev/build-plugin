@@ -410,10 +410,10 @@ namespace Ateo.Build
 				? AssetDatabase.LoadAssetAtPath<ProjectConfig>(AssetDatabase.GUIDToAssetPath(projectGuids[0]))
 				: null;
 
-			if (string.IsNullOrEmpty(_baseUrl))
-			{
-				_baseUrl = _project != null ? _project.ServerBaseUrl : "https://build.ateonet.work";
-			}
+			// Always track the loaded project's configured server URL - it can change (e.g. a fresh onboarding pointing
+			// at http://localhost:8111). Caching the first value was why "Build On Server" hit an unreachable host.
+			if (_project != null && !string.IsNullOrEmpty(_project.ServerBaseUrl)) _baseUrl = _project.ServerBaseUrl;
+			else if (string.IsNullOrEmpty(_baseUrl)) _baseUrl = "https://build.ateonet.work";
 
 			// Drop cached views whose asset was deleted, so the dictionary doesn't leak.
 			List<BuildDefinition> stale = new List<BuildDefinition>();

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.3] - 2026-07-01
+### Fixed
+- **"Build On Server" hit a stale server URL** — the panel cached its base URL the first time (defaulting to `build.ateonet.work` when no project was loaded yet) and never updated it, so triggering a build against a project configured for `http://localhost:8111` failed with "An error occurred while sending the request". The base URL now always tracks the loaded ProjectConfig's server URL.
+
 ## [0.7.2] - 2026-07-01
 ### Fixed
 - **VCS record pointers stored as plain text, not concealed** — `repoUrl` / `vcsType` / `credentialName` are non-secret, so they no longer write as masked `password` fields in 1Password. `CreateOrUpdateAsync` / `OpCli.CreateOrEditItemAsync` gained a `concealed` flag (default true for real secrets); the wizard's record writes pass `concealed: false`.
