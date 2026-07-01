@@ -175,8 +175,8 @@ namespace Ateo.Build
 		// --- Unity --------------------------------------------------------------------------------------------
 
 		[BoxGroup("Unity"), PropertyOrder(40)]
-		[ValueDropdown(nameof(LicenseOptions), AppendNextDrawer = true)]
-		[SerializeField, LabelText("License"), Tooltip("Unity license name (matched agent-side to <name>.ulf). Read from the unity-licenses 1Password item when available; default \"ateo\".")]
+		[ValueDropdown(nameof(LicenseOptions))]
+		[SerializeField, LabelText("License"), Tooltip("Unity license name (matched agent-side to <name>.ulf). Enumerated from the 'unity-licenses' item in the secret provider; default \"ateo\".")]
 		private string _unityLicenseName = "ateo";
 
 		[BoxGroup("Unity"), PropertyOrder(41)]
@@ -467,10 +467,12 @@ namespace Ateo.Build
 
 		private void AutoDetect()
 		{
-			if (string.IsNullOrEmpty(_projectKey)) _projectKey = ToProjectKey(Application.productName);
+			// Project key is intentionally NOT pre-filled - the dev types it deliberately (a wrong guess like the
+			// Unity product name is worse than a blank field the wizard forces you to fill in).
 			if (string.IsNullOrEmpty(_unityVersion)) _unityVersion = Application.unityVersion;
 			DetectGitRemote();
 			RefreshLicenses();
+			RefreshFromServer(); // populate the Team dropdown + coords up front (no-op without a token / if unreachable)
 		}
 
 		private void DetectGitRemote()

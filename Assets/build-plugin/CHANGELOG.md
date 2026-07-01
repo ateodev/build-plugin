@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.5] - 2026-07-01
+### Fixed (project-setup wizard UX)
+- **Project key no longer pre-filled** — was silently seeded from the Unity product name (misleading); now blank, typed deliberately.
+- **License is a normal dropdown** — dropped the `AppendNextDrawer` hybrid text+dropdown; matches the Team/VCS dropdowns. Enumerates from the provider's `unity-licenses` item.
+- **Team dropdown auto-fetches on open** — teams + coords are pulled up front (no-op without a token / if the server is unreachable), instead of only after clicking "Refresh".
+
 ## [0.6.4] - 2026-07-01
 ### Removed
 - **"Executor fallback" setting** — the manual executor-id field is gone; executor resolution now relies solely on auto-discovery (the platform→executor map). `BuildServerSettings.BuildTypeId` removed; `ResolveExecutor` returns empty (an actionable "no executor for platform" message) when discovery finds none.
