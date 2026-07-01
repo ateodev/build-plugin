@@ -1,3 +1,5 @@
+using System;
+
 namespace Ateo.Build
 {
 	/// <summary>
@@ -26,19 +28,28 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The provider configured for a project (its scheme + coordinates). Used by the write/validation paths
-		/// (wizard, panel) where the scheme comes from the project, not a reference. Falls back to the default
-		/// 1Password provider when no project is supplied.
+		/// The provider to use at BUILD time, when the scheme isn't carried by a specific reference. Coordinates
+		/// are no longer on ProjectConfig (§11.7): the server's executor exports the team's coords as env
+		/// (<c>UNITYBUILD_PROVIDER_SCHEME/CONFIG/ACCOUNT</c>) and this reads them; locally they're absent and the
+		/// defaults apply (1Password, the dev's own signed-in session - a local build never needs the robot
+		/// account). The wizard's write path passes fetched coords to <see cref="Resolve"/> directly instead.
 		/// </summary>
-		public static ISecretProvider ForProject(ProjectConfig project)
+		public static ISecretProvider ForBuild()
 		{
-			if (project == null) return new OnePasswordProvider();
+			string scheme = Environment.GetEnvironmentVariable("UNITYBUILD_PROVIDER_SCHEME");
 
-			string scheme = string.IsNullOrEmpty(project.SecretProviderScheme)
-				? OnePasswordProvider.SchemeName
-				: project.SecretProviderScheme;
+			return ResolveWithBuildCoords(string.IsNullOrEmpty(scheme) ? OnePasswordProvider.SchemeName : scheme);
+		}
 
-			return Resolve(scheme, project.SecretProviderVault, project.SecretProviderAccount);
+		/// <summary>
+		/// The provider for a <paramref name="scheme"/> (typically carried by a reference), with coordinates from
+		/// the build environment - <c>UNITYBUILD_PROVIDER_CONFIG/ACCOUNT</c> on the server, defaults locally.
+		/// </summary>
+		public static ISecretProvider ResolveWithBuildCoords(string scheme)
+		{
+			return Resolve(scheme,
+				Environment.GetEnvironmentVariable("UNITYBUILD_PROVIDER_CONFIG"),
+				Environment.GetEnvironmentVariable("UNITYBUILD_PROVIDER_ACCOUNT"));
 		}
 	}
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0] - 2026-07-01
+Self-service onboarding — ProjectConfig slimmed, nothing the server owns is typed.
+
+### Added
+- **Team dropdown** — the project-setup wizard's Team field is a live `ValueDropdown` of the server's teams (top-level TeamCity projects, `TeamCityClient.ListTeamsAsync`); a dev picks a valid team and never has to ask the admin what to enter.
+- **Live provider-coords fetch** — coords come from the selected team's TeamCity params (single source, `GetTeamProviderCoordsAsync`), fetched via the panel's token; shown read-only, never typed or committed.
+
+### Changed
+- **ProjectConfig slimmed** — dropped `_repoUrl`, `_vcsCredentialName`, and the four `_secretProvider*` fields. Repo URL + checkout credential now come from the provider `vcs-<key>` record (server-authoritative); provider coords from TeamCity team params. ProjectConfig is now just "who am I + how do I build + which secrets do I reference."
+- **Build-time secret coords via environment** — `BuildRunner`/`SecretsView` read coords from `UNITYBUILD_PROVIDER_*` env (server) / defaults (local), no longer from ProjectConfig.
+
 ## [0.5.0] - 2026-07-01
 Editor UX + local-build reliability.
 

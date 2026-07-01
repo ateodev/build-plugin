@@ -277,7 +277,7 @@ namespace Ateo.Build
 
 			ProjectConfig project = _owner != null ? _owner.Project : null;
 			string projectKey = project != null ? project.ProjectKey : "project";
-			ISecretProvider provider = SecretProviders.ForProject(project);
+			ISecretProvider provider = SecretProviders.ForBuild();
 			string item = projectKey + "-android-signing";
 
 			if (generated)

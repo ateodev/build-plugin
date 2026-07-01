@@ -217,6 +217,49 @@ namespace Ateo.Build
 			return result;
 		}
 
+		/// <summary>
+		/// The teams: top-level TeamCity projects (direct children of <c>_Root</c>, per flat tenancy). Powers the
+		/// wizard's team dropdown so a dev can only pick a real team - never has to ask the server admin what to type.
+		/// Ids only; token-scoped, so only teams the user can see are returned.
+		/// </summary>
+		public async Task<List<string>> ListTeamsAsync()
+		{
+			string json = await GetAsync("/app/rest/projects?fields=project(id,parentProjectId)");
+			ProjectListDto list = JsonUtility.FromJson<ProjectListDto>(json);
+
+			List<string> teams = new List<string>();
+			if (list != null && list.project != null)
+			{
+				foreach (ProjectDto p in list.project)
+				{
+					if (p.parentProjectId == "_Root" && p.id != "_Root") teams.Add(p.id);
+				}
+			}
+
+			return teams;
+		}
+
+		/// <summary>The team's provider coordinates from its TeamCity project params (<c>unitybuild.provider.*</c>),
+		/// the single source of truth (§11.7) the wizard uses to write records - never committed to ProjectConfig.</summary>
+		public async Task<ProviderCoords> GetTeamProviderCoordsAsync(string teamId)
+		{
+			string json = await GetAsync("/app/rest/projects/id:" + Uri.EscapeDataString(teamId) + "/parameters?fields=property(name,value)");
+			ParamsDto dto = JsonUtility.FromJson<ParamsDto>(json);
+
+			ProviderCoords coords = new ProviderCoords();
+			if (dto != null && dto.property != null)
+			{
+				foreach (PropertyDto p in dto.property)
+				{
+					if (p.name == "unitybuild.provider.scheme") coords.Scheme = p.value;
+					else if (p.name == "unitybuild.provider.config") coords.Config = p.value;
+					else if (p.name == "unitybuild.provider.account") coords.Account = p.value;
+				}
+			}
+
+			return coords;
+		}
+
 		/// <summary>Download one artifact to a local file.</summary>
 		public async Task DownloadArtifactAsync(long id, string artifactPath, string destinationFile)
 		{
@@ -229,6 +272,14 @@ namespace Ateo.Build
 		public void Dispose()
 		{
 			_http.Dispose();
+		}
+
+		/// <summary>A team's non-secret provider coordinates (scheme + config/vault + account), fetched from TeamCity.</summary>
+		public sealed class ProviderCoords
+		{
+			public string Scheme;
+			public string Config;
+			public string Account;
 		}
 
 		#endregion
@@ -322,6 +373,8 @@ namespace Ateo.Build
 		[Serializable] private sealed class ArtifactListDto { public ArtifactFileDto[] file; }
 		[Serializable] private sealed class BuildTypeDto { public string id; public ParamsDto parameters; }
 		[Serializable] private sealed class ParamsDto { public PropertyDto[] property; }
+		[Serializable] private sealed class ProjectListDto { public ProjectDto[] project; }
+		[Serializable] private sealed class ProjectDto { public string id; public string parentProjectId; }
 		[Serializable] private sealed class BuildTypesDto { public BuildTypeDto[] buildType; }
 
 		#endregion

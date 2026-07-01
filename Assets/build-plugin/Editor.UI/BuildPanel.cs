@@ -139,7 +139,9 @@ namespace Ateo.Build
 		[OnInspectorGUI, PropertyOrder(-1000)]
 		private void DrawOpCliWarning()
 		{
-			if (_project == null || _project.SecretProviderScheme != "op" || OpCli.IsAvailable()) return;
+			// Coords are no longer on ProjectConfig (§11.7); locally the effective scheme is 1Password (the
+			// default). When a non-op team exists, gate this on the fetched team scheme instead.
+			if (_project == null || OpCli.IsAvailable()) return;
 
 			EditorGUILayout.HelpBox(
 				"1Password CLI ('op') not found. This project resolves its secrets and checkout credentials through " +

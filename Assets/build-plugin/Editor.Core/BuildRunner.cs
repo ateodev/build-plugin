@@ -485,9 +485,8 @@ namespace Ateo.Build
 		/// </summary>
 		private static ISecretProvider ResolveSecretProvider(string scheme, ProjectConfig project)
 		{
-			return SecretProviders.Resolve(scheme,
-				project != null ? project.SecretProviderVault : null,
-				project != null ? project.SecretProviderAccount : null);
+			// Coordinates come from the build environment (server) / defaults (local), not ProjectConfig (§11.7).
+			return SecretProviders.ResolveWithBuildCoords(scheme);
 		}
 
 		/// <summary>

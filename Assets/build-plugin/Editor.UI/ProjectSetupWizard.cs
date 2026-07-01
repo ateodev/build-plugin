@@ -55,8 +55,34 @@ namespace Ateo.Build
 		[SerializeField, LabelText("Project key"), Tooltip("Unique project key - lowercase, a-z 0-9 and '-' only. Suggested from the product name; editable.")]
 		private string _projectKey = "";
 
-		[BoxGroup("Project"), PropertyOrder(1)]
-		[SerializeField, Tooltip("Trust-boundary team this project belongs to (resolves the TeamCity subtree/executors).")]
+		[NonSerialized] private List<string> _teams = new List<string>();
+
+		[BoxGroup("Project"), PropertyOrder(0)]
+		[Button("Refresh teams + coords from server")]
+		private async void RefreshFromServer()
+		{
+			string token = BuildServerSettings.Token;
+			if (string.IsNullOrEmpty(token)) { _validation = "No TeamCity access token set (Build Server Settings)."; Repaint(); return; }
+
+			try
+			{
+				using (TeamCityClient client = new TeamCityClient(_serverBaseUrl, token))
+				{
+					_teams = await client.ListTeamsAsync();
+					if (!string.IsNullOrEmpty(_teamId)) await FetchCoords(client);
+				}
+
+				_validation = "Fetched " + _teams.Count + " team(s) from the server.";
+			}
+			catch (Exception exception) { _validation = "Team fetch failed: " + exception.Message; }
+
+			Repaint();
+		}
+
+		[BoxGroup("Project"), PropertyOrder(1), LabelText("Team")]
+		[ValueDropdown(nameof(_teams)), OnValueChanged(nameof(OnTeamChanged))]
+		[SerializeField, Tooltip("Trust-boundary team - a top-level TeamCity project. Pick from the server-supplied list " +
+			"('Refresh from server' if empty); you never have to guess a valid value.")]
 		private string _teamId = "";
 
 		[BoxGroup("Project"), PropertyOrder(2)]
@@ -70,15 +96,16 @@ namespace Ateo.Build
 		// --- Secrets provider ---------------------------------------------------------------------------------
 
 		[BoxGroup("Secrets provider"), PropertyOrder(10)]
-		[SerializeField, LabelText("Scheme"), Tooltip("Secret-provider scheme that resolves this project's references (default \"op\" for 1Password).")]
+		[InfoBox("Fetched from the selected team's TeamCity params (single source) - not typed here or committed to ProjectConfig. Defaults shown until a team is selected + refreshed.", InfoMessageType.None)]
+		[SerializeField, ReadOnly, LabelText("Scheme")]
 		private string _secretProviderScheme = "op";
 
 		[BoxGroup("Secrets provider"), PropertyOrder(11)]
-		[SerializeField, LabelText("Vault / config"), Tooltip("Non-secret provider config (1Password vault name, or the OpenBao server URL). Default \"Build Server\".")]
+		[SerializeField, ReadOnly, LabelText("Vault / config")]
 		private string _secretProviderConfig = "Build Server";
 
 		[BoxGroup("Secrets provider"), PropertyOrder(12)]
-		[SerializeField, LabelText("Account"), Tooltip("1Password account shorthand used for validation / license lookup (environment-local, not committed). Default \"ateoteam\".")]
+		[SerializeField, ReadOnly, LabelText("Account")]
 		private string _secretProviderAccount = "ateoteam";
 
 		// --- VCS ----------------------------------------------------------------------------------------------
@@ -346,6 +373,29 @@ namespace Ateo.Build
 			}
 		}
 
+		private async void OnTeamChanged()
+		{
+			string token = BuildServerSettings.Token;
+			if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(_teamId)) return;
+
+			try
+			{
+				using (TeamCityClient client = new TeamCityClient(_serverBaseUrl, token)) { await FetchCoords(client); }
+				Repaint();
+			}
+			catch (Exception exception) { _validation = "Coords fetch failed: " + exception.Message; Repaint(); }
+		}
+
+		// Provider coords are team-level (single source, §11.7): fetched from the team's TeamCity params, never typed
+		// or committed. The wizard uses them only to WRITE the vcs-<key> record + provision secrets.
+		private async Task FetchCoords(TeamCityClient client)
+		{
+			TeamCityClient.ProviderCoords coords = await client.GetTeamProviderCoordsAsync(_teamId);
+			if (!string.IsNullOrEmpty(coords.Scheme))  _secretProviderScheme  = coords.Scheme;
+			if (!string.IsNullOrEmpty(coords.Config))  _secretProviderConfig  = coords.Config;
+			if (!string.IsNullOrEmpty(coords.Account)) _secretProviderAccount = coords.Account;
+		}
+
 		private async Task<string> TestProviderAsync()
 		{
 			if (_secretProviderScheme != OnePasswordProvider.SchemeName) return "Provider: scheme '" + _secretProviderScheme + "' - no live check.";
@@ -466,17 +516,16 @@ namespace Ateo.Build
 
 		private void ApplyFields(ProjectConfig project)
 		{
+			// Slim ProjectConfig (§11.7): repo URL, checkout cred and provider coords are NOT persisted here -
+			// the server reads the repo/cred from the provider vcs-<key> record and the coords from TeamCity team
+			// params. The wizard still uses its own coord fields (fetched) to WRITE those records; see WriteVcsRecord.
 			SetField(project, "_projectKey", _projectKey);
 			SetField(project, "_teamId", _teamId);
 			SetField(project, "_serverBaseUrl", _serverBaseUrl);
 			SetField(project, "_slackChannelId", _slackChannelId);
 			SetField(project, "_vcs", _vcs);
-			SetField(project, "_repoUrl", _repoUrl);
 			SetField(project, "_unityVersion", _unityVersion);
 			SetField(project, "_unityLicenseName", _unityLicenseName);
-			SetField(project, "_secretProviderScheme", _secretProviderScheme);
-			SetField(project, "_secretProviderConfig", _secretProviderConfig);
-			SetField(project, "_vcsCredentialName", ResolvedCredentialName());
 		}
 
 		private string ResolvedCredentialName()

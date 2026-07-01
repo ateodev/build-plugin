@@ -148,7 +148,8 @@ namespace Ateo.Build
 
 		private static ISecretProvider ProviderFor(string scheme, ProjectConfig project)
 		{
-			return SecretProviders.Resolve(scheme, project.SecretProviderVault, project.SecretProviderAccount);
+			// Coordinates from the build environment / defaults, not ProjectConfig (§11.7).
+			return SecretProviders.ResolveWithBuildCoords(scheme);
 		}
 
 		#endregion
