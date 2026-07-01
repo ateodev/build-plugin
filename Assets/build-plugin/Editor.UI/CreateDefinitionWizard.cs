@@ -395,7 +395,11 @@ namespace Ateo.Build
 		private void ProvisionSecret(ISecretProvider provider, string item, string field, SecretValue value, SecretKind kind,
 			string logicalKey, string description)
 		{
-			string reference = OnePasswordProvider.SchemeName + "://" + OnePasswordProvider.DefaultVault + "/" + item + "/" + field;
+			// Scheme-correct pointer from the provider itself (no hand-assembled op:// here); replaced by the
+			// write-confirmed reference on success. Only the defensive no-provider branch names a scheme.
+			string reference = provider != null
+				? provider.ReferenceFor(item, field, kind).Reference
+				: OnePasswordProvider.SchemeName + "://" + OnePasswordProvider.DefaultVault + "/" + item + "/" + field;
 
 			if (provider != null)
 			{

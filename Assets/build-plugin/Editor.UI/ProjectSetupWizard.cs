@@ -446,15 +446,14 @@ namespace Ateo.Build
 
 		private async Task<string> TestProviderAsync()
 		{
-			if (_secretProviderScheme != OnePasswordProvider.SchemeName) return "Provider: scheme '" + _secretProviderScheme + "' - no live check.";
-
 			try
 			{
 				ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
-				// A harmless presence probe; a signed-out provider throws and is reported, not fatal.
-				await provider.ExistsAsync(new SecretRef(
-					OnePasswordProvider.SchemeName + "://" + _secretProviderConfig + "/unity-licenses/" + _unityLicenseName));
-				return "Provider: 1Password reachable (vault '" + _secretProviderConfig + "').";
+				if (provider == null) return "Provider: no implementation for scheme '" + _secretProviderScheme + "'.";
+
+				// A harmless presence probe via the provider's own reference builder; a signed-out provider throws and is reported, not fatal.
+				await provider.ExistsAsync(provider.ReferenceFor("unity-licenses", _unityLicenseName));
+				return "Provider: reachable (scheme '" + _secretProviderScheme + "', config '" + _secretProviderConfig + "').";
 			}
 			catch (Exception exception)
 			{
@@ -527,21 +526,19 @@ namespace Ateo.Build
 		{
 			try
 			{
-				int exit = WizardShell.Run(OpCli.ResolveCliPath(),
-					"item get unity-licenses --vault " + Quote(_secretProviderConfig) +
-					" --account " + Quote(_secretProviderAccount) + " --format json",
-					BuildPanel.ProjectRoot, out string json, out _);
-				if (exit != 0 || string.IsNullOrWhiteSpace(json)) return null;
+				// Read the license registry through the provider (ReadRecord = field-label -> value), not the op CLI:
+				// the field LABELS are the license names. Any provider serving the record works, unchanged.
+				ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
+				if (provider == null) return null;
 
-				OpItem item = JsonUtility.FromJson<OpItem>(json);
-				if (item == null || item.fields == null) return null;
+				IReadOnlyDictionary<string, string> record = WizardShell.RunSync(() => provider.ReadRecordAsync("unity-licenses"));
+				if (record == null || record.Count == 0) return null;
 
 				List<string> names = new List<string>();
-				foreach (OpField field in item.fields)
+				foreach (string label in record.Keys)
 				{
-					if (field == null || string.IsNullOrEmpty(field.label)) continue;
-					if (field.label == "notesPlain" || field.label == "password") continue;
-					if (!names.Contains(field.label)) names.Add(field.label);
+					if (string.IsNullOrEmpty(label) || label == "notesPlain" || label == "password") continue;
+					if (!names.Contains(label)) names.Add(label);
 				}
 
 				return names;

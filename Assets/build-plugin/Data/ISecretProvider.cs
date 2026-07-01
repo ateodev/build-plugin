@@ -39,6 +39,13 @@ namespace Ateo.Build
 		/// <summary>Whether the referenced secret exists - backs the panel's present? columns.</summary>
 		Task<bool> ExistsAsync(SecretRef r);
 
+		/// <summary>
+		/// Build the scheme-tagged reference pointer for an item/field WITHOUT writing - so consumers (wizards)
+		/// never hand-assemble a provider-specific <c>op://…</c> string. Used for a reachability probe and as the
+		/// fallback pointer when a write couldn't confirm the reference.
+		/// </summary>
+		SecretRef ReferenceFor(string item, string field, SecretKind kind = SecretKind.String);
+
 		/// <summary>Create or update a secret/record field and return its reference. MANDATORY - the wizard self-serves onboarding through it (§11.7).</summary>
 		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value);
 	}

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.3] - 2026-07-01
+### Changed
+- **Completed the provider-agnostic sweep** — removed the remaining 1Password-specific shortcuts in the wizards. `ISecretProvider` gained `ReferenceFor(item, field)` so consumers never hand-assemble an `op://` string; the create-definition secret fallback reference, the project-setup provider **reachability probe** (`ExistsAsync` + `ReferenceFor`, no scheme gate), and the **license-registry read** (`ReadRecordAsync` instead of shelling to `op item get`) now all go through the provider interface. Adding a second provider requires no wizard changes.
+
 ## [0.6.2] - 2026-07-01
 ### Changed
 - **Provider-presence check is now fully provider-agnostic** — `ISecretProvider` gained `IsAvailable()` + `UnavailableHint`; the Build Panel's "provider not set up" banner asks whichever provider(s) a project actually references (from its scheme-tagged secret registry), instead of hardcoding `OpCli`. Adding a provider (OpenBao, …) surfaces its own unavailability warning for free — no UI change. (Removes the deferred 1Password-specific shortcut.)

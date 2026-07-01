@@ -108,6 +108,11 @@ namespace Ateo.Build
 			await _op.CreateOrEditItemAsync(_vault, item, field, value, _account);
 
 			SecretKind kind = value != null && value.IsFile ? SecretKind.File : SecretKind.String;
+			return ReferenceFor(item, field, kind);
+		}
+
+		public SecretRef ReferenceFor(string item, string field, SecretKind kind = SecretKind.String)
+		{
 			return new SecretRef(SchemeName + "://" + _vault + "/" + item + "/" + field, kind);
 		}
 
