@@ -398,7 +398,7 @@ namespace Ateo.Build
 				{
 					using (TeamCityClient client = owner.NewClient())
 					{
-						List<BuildStatus> builds = await client.ListBuildsAsync(executor, projectKey, 10);
+						List<BuildStatus> builds = await client.ListBuildsAsync(executor, projectKey, _definition.DefinitionName, 10);
 						foreach (BuildStatus build in builds)
 						{
 							if (build.Definition != null && build.Definition != _definition.DefinitionName) continue;

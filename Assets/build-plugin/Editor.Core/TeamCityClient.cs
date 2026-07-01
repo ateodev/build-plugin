@@ -66,11 +66,13 @@ namespace Ateo.Build
 			return ToStatus(JsonUtility.FromJson<BuildDto>(json));
 		}
 
-		/// <summary>Recent builds of <paramref name="buildTypeId"/>, optionally filtered to one project key.</summary>
-		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string projectKey, int count = 20)
+		/// <summary>Recent builds of <paramref name="buildTypeId"/>, filtered to one project key and (optionally) one
+		/// definition - so a definition's history shows ITS builds, not every build the shared executor ran.</summary>
+		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string projectKey, string definitionName, int count = 20)
 		{
 			string locator = "buildType:(id:" + buildTypeId + ")";
 			if (!string.IsNullOrEmpty(projectKey)) locator += ",property:(name:unitybuild.project,value:" + projectKey + ")";
+			if (!string.IsNullOrEmpty(definitionName)) locator += ",property:(name:unitybuild.definition,value:" + definitionName + ")";
 			locator += ",count:" + count;
 
 			string json = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(locator) +

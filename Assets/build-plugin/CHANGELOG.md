@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.4] - 2026-07-01
+### Fixed
+- **A definition's Builds list now shows only ITS builds** — it was filtered by project only, so a shared executor's builds from *other* definitions appeared (a brand-new definition showed 10 unrelated builds). Now filtered by `unitybuild.definition` too.
+
 ## [0.7.3] - 2026-07-01
 ### Fixed
 - **"Build On Server" hit a stale server URL** — the panel cached its base URL the first time (defaulting to `build.ateonet.work` when no project was loaded yet) and never updated it, so triggering a build against a project configured for `http://localhost:8111` failed with "An error occurred while sending the request". The base URL now always tracks the loaded ProjectConfig's server URL.
