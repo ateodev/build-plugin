@@ -59,10 +59,6 @@ namespace Ateo.Build
 		[BoxGroup("Project"), PropertyOrder(0), OnInspectorGUI]
 		private void DrawProjectKey()
 		{
-			EditorGUILayout.HelpBox("The join key (lowercase a-z 0-9 and '-'). Onboarding writes the vcs-<project-key> record + " +
-				"credential to your secret provider, so the build server resolves repo, credentials, signing and license from it - no admin step.",
-				MessageType.Info);
-
 			const string controlName = "ateo.projectKey";
 			Event e = Event.current;
 			if (e.type == EventType.KeyDown && GUI.GetNameOfFocusedControl() == controlName)
@@ -83,32 +79,26 @@ namespace Ateo.Build
 
 		[NonSerialized] private List<string> _teams = new List<string>();
 
-		[BoxGroup("Project"), PropertyOrder(0)]
-		[Button("Refresh teams + coords from server")]
-		private async void RefreshFromServer()
+		// Teams are fetched once on wizard open (they don't change while the window is open). TeamCity-only -
+		// NO secret-provider interaction here; that waits until a team is chosen and its provider type is known.
+		private async void FetchTeams()
 		{
 			string token = BuildServerSettings.Token;
-			if (string.IsNullOrEmpty(token)) { _validation = "No TeamCity access token set (Build Server Settings)."; Repaint(); return; }
+			if (string.IsNullOrEmpty(token)) return;
 
 			try
 			{
-				using (TeamCityClient client = new TeamCityClient(_serverBaseUrl, token))
-				{
-					_teams = await client.ListTeamsAsync();
-					if (!string.IsNullOrEmpty(_teamId)) await FetchCoords(client);
-				}
-
-				_validation = "Fetched " + _teams.Count + " team(s) from the server.";
+				using (TeamCityClient client = new TeamCityClient(_serverBaseUrl, token)) { _teams = await client.ListTeamsAsync(); }
 			}
-			catch (Exception exception) { _validation = "Team fetch failed: " + exception.Message; }
+			catch (Exception exception) { _validation = "Could not fetch teams: " + exception.Message; }
 
 			Repaint();
 		}
 
 		[BoxGroup("Project"), PropertyOrder(1), LabelText("Team")]
 		[ValueDropdown(nameof(_teams)), OnValueChanged(nameof(OnTeamChanged))]
-		[SerializeField, Tooltip("Trust-boundary team - a top-level TeamCity project. Pick from the server-supplied list " +
-			"('Refresh from server' if empty); you never have to guess a valid value.")]
+		[SerializeField, Tooltip("Trust-boundary team - a top-level TeamCity project, fetched from the server. Choosing " +
+			"one fills the secret-provider coords + licenses; you never have to guess a valid value.")]
 		private string _teamId = "";
 
 		[BoxGroup("Project"), PropertyOrder(2)]
@@ -122,17 +112,19 @@ namespace Ateo.Build
 		// --- Secrets provider ---------------------------------------------------------------------------------
 
 		[BoxGroup("Secrets provider"), PropertyOrder(10)]
-		[InfoBox("Fetched from the selected team's TeamCity params (single source) - not typed here or committed to ProjectConfig. Defaults shown until a team is selected + refreshed.", InfoMessageType.None)]
+		[InfoBox("Empty until you pick a team - then filled from that team's TeamCity params (the single source). These " +
+			"are provider-agnostic coordinates: 'Config'/'Account' mean whatever the team's provider needs (a 1Password " +
+			"vault/account, an OpenBao URL, ...). Never typed here or committed.", InfoMessageType.None)]
 		[SerializeField, ReadOnly, LabelText("Scheme")]
-		private string _secretProviderScheme = "op";
+		private string _secretProviderScheme = "";
 
 		[BoxGroup("Secrets provider"), PropertyOrder(11)]
-		[SerializeField, ReadOnly, LabelText("Vault / config")]
-		private string _secretProviderConfig = "Build Server";
+		[SerializeField, ReadOnly, LabelText("Config")]
+		private string _secretProviderConfig = "";
 
 		[BoxGroup("Secrets provider"), PropertyOrder(12)]
 		[SerializeField, ReadOnly, LabelText("Account")]
-		private string _secretProviderAccount = "ateoteam";
+		private string _secretProviderAccount = "";
 
 		// --- VCS ----------------------------------------------------------------------------------------------
 
@@ -201,12 +193,12 @@ namespace Ateo.Build
 
 		[BoxGroup("Unity"), PropertyOrder(40)]
 		[ValueDropdown(nameof(LicenseOptions))]
-		[SerializeField, LabelText("License"), Tooltip("Unity license name (matched agent-side to <name>.ulf). Enumerated from the 'unity-licenses' item in the secret provider; default \"ateo\".")]
+		[SerializeField, LabelText("License"), Tooltip("Unity license name (matched agent-side to <name>.ulf). Enumerated from the team provider's 'unity-licenses' item after a team is chosen; default \"ateo\".")]
 		private string _unityLicenseName = "ateo";
 
-		[BoxGroup("Unity"), PropertyOrder(41)]
-		[SerializeField, LabelText("Unity version"), Tooltip("Default Unity version. Auto-detected from the running editor.")]
-		private string _unityVersion = "";
+		// The Unity version is intentionally NOT in the wizard: it's rarely pinned. Left empty so the agent reads it
+		// from ProjectSettings/ProjectVersion.txt; pin it later on the ProjectConfig asset only if a build must differ.
+		[SerializeField, HideInInspector] private string _unityVersion = "";
 
 		#endregion
 
@@ -368,14 +360,7 @@ namespace Ateo.Build
 
 		#region Validate / Create
 
-		[PropertyOrder(50), PropertySpace(8), ButtonGroup("Actions")]
-		[Button("Validate", ButtonSizes.Large)]
-		private void Validate()
-		{
-			ValidateAsync();
-		}
-
-		[PropertyOrder(51), ButtonGroup("Actions")]
+		[PropertyOrder(51), PropertySpace(8)]
 		[Button("Create ProjectConfig", ButtonSizes.Large)]
 		private void Create()
 		{
@@ -416,36 +401,6 @@ namespace Ateo.Build
 		[ShowIf("@!string.IsNullOrEmpty(this._validation)")]
 		private string Validation => _validation;
 
-		private async void ValidateAsync()
-		{
-			_validation = "Validating...";
-			Repaint();
-
-			string server = await TestServerAsync();
-			string provider = await TestProviderAsync();
-			_validation = server + "\n" + provider;
-			Repaint();
-		}
-
-		private async Task<string> TestServerAsync()
-		{
-			string token = BuildServerSettings.Token;
-			if (string.IsNullOrEmpty(token)) return "Server: no access token set (Settings) - skipped.";
-
-			try
-			{
-				using (TeamCityClient client = new TeamCityClient(_serverBaseUrl, token))
-				{
-					Dictionary<string, string> executors = await client.DiscoverExecutorsAsync();
-					return "Server: connected. " + executors.Count + " executor(s) visible.";
-				}
-			}
-			catch (Exception exception)
-			{
-				return "Server: NOT reachable (" + exception.Message + ").";
-			}
-		}
-
 		private async void OnTeamChanged()
 		{
 			string token = BuildServerSettings.Token;
@@ -454,6 +409,9 @@ namespace Ateo.Build
 			try
 			{
 				using (TeamCityClient client = new TeamCityClient(_serverBaseUrl, token)) { await FetchCoords(client); }
+				// The team's provider coords are now known - this is the FIRST time the wizard touches the secret
+				// provider (a 1Password auth prompt legitimately appears HERE, not on wizard open).
+				RefreshLicenses();
 				Repaint();
 			}
 			catch (Exception exception) { _validation = "Coords fetch failed: " + exception.Message; Repaint(); }
@@ -469,22 +427,6 @@ namespace Ateo.Build
 			if (!string.IsNullOrEmpty(coords.Account)) _secretProviderAccount = coords.Account;
 		}
 
-		private async Task<string> TestProviderAsync()
-		{
-			try
-			{
-				ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
-				if (provider == null) return "Provider: no implementation for scheme '" + _secretProviderScheme + "'.";
-
-				// A harmless presence probe via the provider's own reference builder; a signed-out provider throws and is reported, not fatal.
-				await provider.ExistsAsync(provider.ReferenceFor("unity-licenses", _unityLicenseName));
-				return "Provider: reachable (scheme '" + _secretProviderScheme + "', config '" + _secretProviderConfig + "').";
-			}
-			catch (Exception exception)
-			{
-				return "Provider: 1Password NOT reachable / signed out (" + exception.Message + ").";
-			}
-		}
 
 		#endregion
 
@@ -492,28 +434,28 @@ namespace Ateo.Build
 
 		private void AutoDetect()
 		{
-			// Pre-fill the project key from the Unity product name, already run through the key normalizer so the
-			// suggestion is itself valid (lowercase [a-z0-9-]); the dev can edit it and every keystroke re-normalizes.
+			// Pre-fill the project key from the Unity product name (already normalized to a valid [a-z0-9-] key).
 			if (string.IsNullOrEmpty(_projectKey)) _projectKey = ToProjectKey(Application.productName);
-			if (string.IsNullOrEmpty(_unityVersion)) _unityVersion = Application.unityVersion;
 			DetectGitRemote();
-			RefreshLicenses();
-			RefreshFromServer(); // populate the Team dropdown + coords up front (no-op without a token / if unreachable)
+			FetchTeams(); // TeamCity-only. Licenses + coords wait for a team to be chosen - no provider auth on open.
 		}
 
 		private void DetectGitRemote()
 		{
 			if (!string.IsNullOrEmpty(_repoUrl)) return;
 
+			// Auto-detect VCS + repo from the checkout: a git remote -> Git; else a .plastic workspace -> Plastic.
 			try
 			{
 				int exit = WizardShell.Run("git", "remote get-url origin", BuildPanel.ProjectRoot, out string url, out _);
-				if (exit == 0 && !string.IsNullOrWhiteSpace(url)) _repoUrl = ToSshRemote(url.Trim());
+				if (exit == 0 && !string.IsNullOrWhiteSpace(url)) { _vcs = VcsKind.Git; _repoUrl = ToSshRemote(url.Trim()); return; }
 			}
 			catch (Exception exception)
 			{
-				Debug.Log("[Project Setup] git remote auto-detect failed (" + exception.Message + ") - enter the repo URL manually.");
+				Debug.Log("[Project Setup] git remote auto-detect failed (" + exception.Message + ") - checking Plastic / enter the repo manually.");
 			}
+
+			if (Directory.Exists(Path.Combine(BuildPanel.ProjectRoot, ".plastic"))) _vcs = VcsKind.Plastic;
 		}
 
 		/// <summary>
@@ -578,9 +520,14 @@ namespace Ateo.Build
 			}
 		}
 
-		private IEnumerable<string> LicenseOptions()
+		// Store the lowercase name (matches <name>.ulf on the agent), but SHOW it capitalized so the dropdown reads nicely.
+		private IEnumerable<ValueDropdownItem<string>> LicenseOptions()
 		{
-			return _licenses ?? new List<string> { "ateo" };
+			foreach (string name in _licenses ?? new List<string> { "ateo" })
+			{
+				string display = string.IsNullOrEmpty(name) ? name : char.ToUpperInvariant(name[0]) + name.Substring(1);
+				yield return new ValueDropdownItem<string>(display, name);
+			}
 		}
 
 		#endregion

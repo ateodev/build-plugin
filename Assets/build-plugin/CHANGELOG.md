@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0] - 2026-07-01
+### Changed (project-setup wizard — UX sign-off pass)
+- **No secret-provider interaction on open** — the wizard no longer touches the provider (no 1Password auth prompt) when it opens. Teams are fetched from TeamCity only; the provider is first touched when you **pick a team** (coords + licenses load then).
+- **Secrets-provider section is empty until a team is chosen**, then filled from that team's TeamCity params. Labels are provider-agnostic (`Scheme` / `Config` / `Account`) — no 1Password-specific wording.
+- **Removed the "Refresh teams + coords" button** — teams auto-fetch on open (they don't change while the window's open).
+- **Removed the project-key info box** (internal detail the user doesn't need) and the **"Validate" button** (its checks weren't required — server reachability shows via the team list, provider via the license list).
+- **Unity version removed from the wizard** — rarely pinned; left blank so the agent reads `ProjectVersion.txt`. Pin it on the ProjectConfig asset only if a build must differ.
+- **License dropdown shows capitalized names** ("Ateo") while storing the lowercase key ("ateo").
+- **VCS type auto-detected** from the checkout (git remote → Git; `.plastic` → Plastic). Full Plastic-shaped fields are still WIP (task #40, with the Plastic E2E #19).
+
 ## [0.6.7] - 2026-07-01
 ### Fixed
 - **Project key formats truly live** — `[OnValueChanged]` only re-formatted the *backing* field, so the change wasn't visible until focus-loss. Now custom-drawn: the input **event** is transformed as you type (space → `-`, uppercase → lowercase, illegal chars blocked), so the field's own buffer is always a valid key; a full normalize (`--` collapse / trim / paste) runs on focus-loss.
