@@ -134,22 +134,37 @@ namespace Ateo.Build
 			}
 		}
 
-		// Banner at the very top of the panel: if this project resolves secrets through 1Password but the op CLI
-		// isn't installed, nothing (build or wizard) can run - so say so loudly with install guidance.
+		// Banner at the very top of the panel: for every secret provider THIS project actually uses, if the
+		// provider isn't usable from this machine, say so loudly with the provider's own setup guidance. Fully
+		// provider-agnostic - it asks each provider (via ISecretProvider.IsAvailable / UnavailableHint); nothing
+		// here knows about 1Password. Add a provider and its unavailability warning shows up here for free.
 		[OnInspectorGUI, PropertyOrder(-1000)]
-		private void DrawOpCliWarning()
+		private void DrawProviderWarnings()
 		{
-			// Coords are no longer on ProjectConfig (§11.7); locally the effective scheme is 1Password (the
-			// default). When a non-op team exists, gate this on the fetched team scheme instead.
-			if (_project == null || OpCli.IsAvailable()) return;
+			if (_project == null) return;
 
-			EditorGUILayout.HelpBox(
-				"1Password CLI ('op') not found. This project resolves its secrets and checkout credentials through " +
-				"it, so builds and the setup wizard cannot run until it is installed. Fix: install 1Password Desktop + " +
-				"CLI and enable Settings > Developer > 'Integrate with 1Password CLI' (or 'winget install " +
-				"AgileBits.1Password.CLI'); or set the OP_CLI_PATH environment variable to your op.exe.",
-				MessageType.Error);
-			EditorGUILayout.Space();
+			HashSet<string> schemes = new HashSet<string>();
+			if (_project.SecretRegistry != null)
+			{
+				foreach (SecretDeclaration declaration in _project.SecretRegistry)
+				{
+					string scheme = declaration?.Ref.Scheme;
+					if (!string.IsNullOrEmpty(scheme)) schemes.Add(scheme);
+				}
+			}
+
+			// Also the build-time provider (checkout cred etc.), even before any secret is registered.
+			ISecretProvider buildProvider = SecretProviders.ForBuild();
+			if (buildProvider != null) schemes.Add(buildProvider.Scheme);
+
+			foreach (string scheme in schemes)
+			{
+				ISecretProvider provider = SecretProviders.Resolve(scheme, null, null);
+				if (provider == null || provider.IsAvailable()) continue;
+
+				EditorGUILayout.HelpBox(provider.UnavailableHint, MessageType.Error);
+				EditorGUILayout.Space();
+			}
 		}
 
 		protected override void OnImGUI()

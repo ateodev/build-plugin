@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.2] - 2026-07-01
+### Changed
+- **Provider-presence check is now fully provider-agnostic** — `ISecretProvider` gained `IsAvailable()` + `UnavailableHint`; the Build Panel's "provider not set up" banner asks whichever provider(s) a project actually references (from its scheme-tagged secret registry), instead of hardcoding `OpCli`. Adding a provider (OpenBao, …) surfaces its own unavailability warning for free — no UI change. (Removes the deferred 1Password-specific shortcut.)
+
 ## [0.6.1] - 2026-07-01
 ### Added
 - **Deploy-key host guidance + Verify** (#29) — the project-setup wizard shows host-specific instructions for adding the generated key (GitHub / GitLab / Bitbucket, read-only) and a **"Verify deploy key"** button that test-clones (`git ls-remote` over SSH with the generated key) to confirm the key works before you leave the wizard. No host PAT required; auto-add via host API intentionally deferred.

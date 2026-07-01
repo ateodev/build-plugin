@@ -62,6 +62,14 @@ namespace Ateo.Build
 		/// <summary>1Password's desktop cache makes local resolution offline-capable, and it reports presence. (Write is mandatory, not a capability flag.)</summary>
 		public SecretProviderCaps Caps => new SecretProviderCaps(offline: true, presence: true);
 
+		public bool IsAvailable() => OpCli.IsAvailable();
+
+		public string UnavailableHint =>
+			"1Password CLI ('op') not found. This project resolves its secrets and checkout credentials through it, " +
+			"so builds and the setup wizard cannot run until it is installed. Fix: install 1Password Desktop + CLI and " +
+			"enable Settings > Developer > 'Integrate with 1Password CLI' (or 'winget install AgileBits.1Password.CLI'); " +
+			"or set the OP_CLI_PATH environment variable to your op.exe.";
+
 		#endregion
 
 		#region Public Methods

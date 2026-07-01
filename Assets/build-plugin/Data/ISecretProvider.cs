@@ -17,6 +17,16 @@ namespace Ateo.Build
 		/// <summary>What this provider can do - drives panel UX (offline / provisioning / presence).</summary>
 		SecretProviderCaps Caps { get; }
 
+		/// <summary>
+		/// Whether this provider is usable from the current machine RIGHT NOW - a cheap, synchronous, local check
+		/// (e.g. its CLI is installed, its endpoint is configured). Lets the panel warn "provider not set up"
+		/// AGNOSTICALLY: it asks whichever provider a project references, so no UI hardwires a provider's tooling.
+		/// </summary>
+		bool IsAvailable();
+
+		/// <summary>Actionable, provider-specific setup guidance shown when <see cref="IsAvailable"/> is false.</summary>
+		string UnavailableHint { get; }
+
 		/// <summary>Resolve a reference to its value (string or file bytes) for the given execution side.</summary>
 		Task<SecretValue> ResolveAsync(SecretRef r, ExecContext ctx);
 
