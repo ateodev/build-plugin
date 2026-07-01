@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.2] - 2026-07-01
+### Fixed
+- **VCS record pointers stored as plain text, not concealed** — `repoUrl` / `vcsType` / `credentialName` are non-secret, so they no longer write as masked `password` fields in 1Password. `CreateOrUpdateAsync` / `OpCli.CreateOrEditItemAsync` gained a `concealed` flag (default true for real secrets); the wizard's record writes pass `concealed: false`.
+
 ## [0.7.1] - 2026-07-01
 ### Fixed
 - **Editing the Server URL re-fetches teams** — changing it (e.g. to `http://localhost:8111`) now reloads the team dropdown on commit, instead of leaving the list stale from the value at open.

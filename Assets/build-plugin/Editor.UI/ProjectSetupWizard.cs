@@ -649,7 +649,8 @@ namespace Ateo.Build
 
 		private static void WriteField(ISecretProvider provider, string item, string field, string value)
 		{
-			WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty)));
+			// concealed:false - these are non-secret record pointers (repoUrl/vcsType/credentialName), stored as plain text.
+			WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty), concealed: false));
 		}
 
 		/// <summary>Provider-contract `vcsType` (§11.7): git / plastic / uvcs. UVCS is distinguished from on-prem Plastic by the chosen credential type.</summary>

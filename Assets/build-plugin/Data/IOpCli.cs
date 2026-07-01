@@ -25,7 +25,8 @@ namespace Ateo.Build
 		/// <summary>Read every field (label -&gt; value) of an item - backs <see cref="ISecretProvider.ReadRecordAsync"/> (the <c>vcs-</c> record).</summary>
 		Task<IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account);
 
-		/// <summary>Create the item if absent, otherwise edit it, setting <paramref name="field"/> to <paramref name="value"/> (string or document).</summary>
-		Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account);
+		/// <summary>Create the item if absent, otherwise edit it, setting <paramref name="field"/> to <paramref name="value"/>
+		/// (string or document). <paramref name="concealed"/> false stores a plain-text field (non-secret record pointers).</summary>
+		Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true);
 	}
 }

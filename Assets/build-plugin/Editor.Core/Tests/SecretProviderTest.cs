@@ -77,7 +77,7 @@ namespace Ateo.Build.Tests
 				return Task.FromResult(RecordResult);
 			}
 
-			public Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account)
+			public Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true)
 			{
 				LastCreateVault = vault;
 				LastCreateItem = item;

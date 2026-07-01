@@ -112,7 +112,7 @@ namespace Ateo.Build
 			return fields;
 		}
 
-		public async Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account)
+		public async Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true)
 		{
 			if (value == null) throw new ArgumentNullException(nameof(value));
 
@@ -122,7 +122,8 @@ namespace Ateo.Build
 				return;
 			}
 
-			string assignment = field + "[password]=" + (value.StringValue ?? string.Empty);
+			// Secret string -> concealed 'password' field; a non-secret record pointer (repoUrl/vcsType/...) -> plain 'text'.
+			string assignment = field + (concealed ? "[password]=" : "[text]=") + (value.StringValue ?? string.Empty);
 
 			if (await ItemExistsAsync(vault, item, account))
 			{

@@ -46,7 +46,9 @@ namespace Ateo.Build
 		/// </summary>
 		SecretRef ReferenceFor(string item, string field, SecretKind kind = SecretKind.String);
 
-		/// <summary>Create or update a secret/record field and return its reference. MANDATORY - the wizard self-serves onboarding through it (§11.7).</summary>
-		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value);
+		/// <summary>Create or update a secret/record field and return its reference. MANDATORY - the wizard self-serves
+		/// onboarding through it (§11.7). <paramref name="concealed"/> false stores a plain-text field, for the non-secret
+		/// record pointers (repoUrl / vcsType / credentialName) rather than a masked one.</summary>
+		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value, bool concealed = true);
 	}
 }
