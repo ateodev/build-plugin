@@ -277,14 +277,14 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The executor config id for a definition's platform: the discovered map first, the manual fallback second.
-		/// Empty when neither is known (the caller turns that into an actionable message).
+		/// The executor config id for a definition's platform, from the auto-discovered platform-&gt;executor map.
+		/// Empty when the platform has no executor (the caller turns that into an actionable message).
 		/// </summary>
 		internal string ResolveExecutor(BuildDefinition definition)
 		{
 			string token = definition.Platform.ToServerToken();
 			if (_executors != null && _executors.TryGetValue(token, out string id) && !string.IsNullOrEmpty(id)) return id;
-			return BuildServerSettings.BuildTypeId;
+			return "";
 		}
 
 		/// <summary>Discover the platform -&gt; executor map (called by views before triggering / listing server builds).</summary>

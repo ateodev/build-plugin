@@ -12,7 +12,6 @@ namespace Ateo.Build
 		#region Fields
 
 		private const string TokenPref = "Ateo.Build.Token";
-		private const string BuildTypePref = "Ateo.Build.BuildTypeId";
 
 		#endregion
 
@@ -23,13 +22,6 @@ namespace Ateo.Build
 		{
 			get => EditorPrefs.GetString(TokenPref, "");
 			set => EditorPrefs.SetString(TokenPref, value ?? "");
-		}
-
-		/// <summary>The executor config id to trigger (manual for now; auto-discovery via the platform tag comes later).</summary>
-		public static string BuildTypeId
-		{
-			get => EditorPrefs.GetString(BuildTypePref, "");
-			set => EditorPrefs.SetString(BuildTypePref, value ?? "");
 		}
 
 		#endregion

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.4] - 2026-07-01
+### Removed
+- **"Executor fallback" setting** — the manual executor-id field is gone; executor resolution now relies solely on auto-discovery (the platform→executor map). `BuildServerSettings.BuildTypeId` removed; `ResolveExecutor` returns empty (an actionable "no executor for platform" message) when discovery finds none.
+
 ## [0.6.3] - 2026-07-01
 ### Changed
 - **Completed the provider-agnostic sweep** — removed the remaining 1Password-specific shortcuts in the wizards. `ISecretProvider` gained `ReferenceFor(item, field)` so consumers never hand-assemble an `op://` string; the create-definition secret fallback reference, the project-setup provider **reachability probe** (`ExistsAsync` + `ReferenceFor`, no scheme gate), and the **license-registry read** (`ReadRecordAsync` instead of shelling to `op item get`) now all go through the provider interface. Adding a second provider requires no wizard changes.

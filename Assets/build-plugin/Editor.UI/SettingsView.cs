@@ -48,10 +48,6 @@ namespace Ateo.Build
 					new GUIContent("Access token", "Your permission-scoped TeamCity token. Never an admin token, never committed."),
 					BuildServerSettings.Token);
 
-				BuildServerSettings.BuildTypeId = EditorGUILayout.TextField(
-					new GUIContent("Executor fallback", "Manual executor id used when auto-discovery can't resolve one."),
-					BuildServerSettings.BuildTypeId);
-
 				if (GUILayout.Button("Test Connection")) _owner.RunAsync(TestConnectionAsync());
 			}
 			SirenixEditorGUI.EndBox();
