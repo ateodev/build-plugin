@@ -44,12 +44,24 @@ namespace Ateo.Build
 
 			SirenixEditorGUI.BeginBox("Connection (this machine only)");
 			{
-				// Only write the EditorPrefs-backed token on an actual edit, not on every repaint.
-				EditorGUI.BeginChangeCheck();
-				string token = EditorGUILayout.PasswordField(
-					new GUIContent("Access token", "Your permission-scoped TeamCity token. Never an admin token, never committed."),
-					BuildServerSettings.Token);
-				if (EditorGUI.EndChangeCheck()) BuildServerSettings.Token = token;
+				using (new EditorGUILayout.HorizontalScope())
+				{
+					// Only write the EditorPrefs-backed token on an actual edit, not on every repaint.
+					EditorGUI.BeginChangeCheck();
+					string token = EditorGUILayout.PasswordField(
+						new GUIContent("Access token", "Your permission-scoped TeamCity token. Never an admin token, never committed."),
+						BuildServerSettings.Token);
+					if (EditorGUI.EndChangeCheck()) BuildServerSettings.Token = token;
+
+					// A PasswordField masks its content, so an explicit reset is the only confident way to
+					// retire a stale/mistyped token.
+					if (GUILayout.Button(new GUIContent("Clear", "Forget the token stored on this machine"), GUILayout.Width(50f)))
+					{
+						BuildServerSettings.Token = string.Empty;
+						// Drop the focused field's own edit buffer, or it re-shows (and could re-commit) the old value.
+						GUI.FocusControl(null);
+					}
+				}
 
 				if (GUILayout.Button("Test Connection")) _owner.RunAsync(TestConnectionAsync());
 			}

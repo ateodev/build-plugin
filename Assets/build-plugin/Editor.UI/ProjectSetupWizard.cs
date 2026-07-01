@@ -79,13 +79,21 @@ namespace Ateo.Build
 		}
 
 		[NonSerialized] private List<string> _teams = new List<string>();
+		[NonSerialized] private bool _tokenMissing;
 
 		// Teams are fetched once on wizard open (they don't change while the window is open). TeamCity-only -
 		// NO secret-provider interaction here; that waits until a team is chosen and its provider type is known.
 		private async void FetchTeams()
 		{
 			string token = BuildServerSettings.Token;
-			if (string.IsNullOrEmpty(token)) return;
+			// Recorded (not a silent return): the first-run dev otherwise just saw an empty Team dropdown
+			// with no hint that the machine-local token is the missing prerequisite.
+			_tokenMissing = string.IsNullOrEmpty(token);
+			if (_tokenMissing)
+			{
+				Repaint();
+				return;
+			}
 
 			try
 			{
@@ -97,10 +105,21 @@ namespace Ateo.Build
 		}
 
 		[BoxGroup("Project"), PropertyOrder(1), LabelText("Team")]
+		[InfoBox("Set your TeamCity access token in the Build Panel's Settings to load teams.",
+			InfoMessageType.Warning, nameof(_tokenMissing))]
 		[ValueDropdown(nameof(_teams)), OnValueChanged(nameof(OnTeamChanged))]
 		[SerializeField, Tooltip("Trust-boundary team - a top-level TeamCity project, fetched from the server. Choosing " +
 			"one fills the secret-provider coords + licenses; you never have to guess a valid value.")]
 		private string _teamId = "";
+
+		// Teams normally load on wizard open; this retry exists for the token-missing first run, so setting the
+		// token in Settings doesn't force the dev to close and reopen a half-filled wizard.
+		[BoxGroup("Project"), PropertyOrder(1.5f), ShowIf(nameof(_tokenMissing))]
+		[Button("Reload teams")]
+		private void ReloadTeams()
+		{
+			FetchTeams();
+		}
 
 		[BoxGroup("Project"), PropertyOrder(2)]
 		[OnValueChanged(nameof(FetchTeams))]

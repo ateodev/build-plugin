@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] - 2026-07-02
+### Fixed
+- **A definition's Default Branch is now actually sent** — triggering a server build only sent `unitybuild.vcs.ref` when the manual Changeset override was typed, so the definition's own branch was silently ignored (empty always meant "repo default"). The trigger now sends the definition's Default Branch (with `refType: branch`) when no override is given.
+- **Canonical branch form = bare name** ("main", empty = repo default): `origin/`-prefixed values are normalized away at trigger and asset-write time (the agent resolves bare names to `origin/<branch>`); the wizard's branch dropdown no longer offers `origin/`-prefixed duplicates or the bogus `origin` entry, and the hardcoded `main` fallback is gone.
+- **Token UX**: a Clear button next to the TeamCity token in Settings; the project-setup wizard now says "Set your TeamCity access token in the Build Panel's Settings to load teams" (with a Reload button) instead of silently showing an empty Team dropdown.
+
 ## [0.8.0] - 2026-07-02
 ### Fixed (debt sprint - full-project review follow-up)
 - **File secrets round-trip**: `CreateOrUpdateAsync(File)` stored a 1Password document but returned a field-style `op://vault/item/field` reference that could never be read back (and `ExistsAsync` reported it absent). File secrets now use the field-less document reference `op://<vault>/<item>` end-to-end (create, resolve, exists), matching the agent-side convention; stored documents no longer leak the random staging file name.

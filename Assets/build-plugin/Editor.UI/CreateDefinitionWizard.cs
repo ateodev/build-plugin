@@ -91,7 +91,8 @@ namespace Ateo.Build
 
 		[BoxGroup("Default branch"), HideLabel, PropertyOrder(8)]
 		[ValueDropdown(nameof(BranchOptions), AppendNextDrawer = true)]
-		[SerializeField, Tooltip("Default branch this definition builds. Dropdown is the repo's branches; you may also type one freely (git fallback).")]
+		[SerializeField, Tooltip("Default branch this definition builds, as a bare branch name (no origin/ prefix). " +
+			"Dropdown is the repo's branches; you may also type one freely (git fallback). Empty = the repo's default branch.")]
 		private string _defaultBranch = "";
 
 		// --- Signing (iOS / Android only) -------------------------------------------------------------------
@@ -226,7 +227,9 @@ namespace Ateo.Build
 		private void ApplySharedFields(BuildDefinition definition)
 		{
 			SetField(definition, "_definitionName", _definitionName);
-			SetField(definition, "_defaultBranch", string.IsNullOrEmpty(_defaultBranch) ? "main" : _defaultBranch);
+			// Canonical form (see VcsBranch): a bare branch name, "origin/"-stripped; empty is VALID and means
+			// the agent resolves the repo's actual default branch - so no hardcoded "main" guess is stored.
+			SetField(definition, "_defaultBranch", VcsBranch.Normalize(_defaultBranch));
 
 			if (_source == BuildSourceMode.Profile)
 			{
@@ -509,8 +512,13 @@ namespace Ateo.Build
 				{
 					foreach (string line in stdout.Split('\n'))
 					{
-						string branch = line.Trim();
-						if (branch.Length > 0 && !_branches.Contains(branch)) _branches.Add(branch);
+						// refs/remotes entries come back "origin/"-prefixed; only the bare canonical form is
+						// offered (the agent resolves it to origin/<branch>), which also folds the local and
+						// remote copy of the same branch into one entry.
+						string branch = VcsBranch.Normalize(line.Trim());
+						// "origin" is the short name of refs/remotes/origin/HEAD - an alias, not a branch.
+						if (branch.Length == 0 || branch == "origin" || branch == "HEAD") continue;
+						if (!_branches.Contains(branch)) _branches.Add(branch);
 					}
 
 					_gitOk = true;
@@ -519,7 +527,9 @@ namespace Ateo.Build
 				int headExit = WizardShell.Run("git", "rev-parse --abbrev-ref HEAD", BuildPanel.ProjectRoot, out string head, out _);
 				if (headExit == 0 && !string.IsNullOrWhiteSpace(head) && string.IsNullOrEmpty(_defaultBranch))
 				{
-					_defaultBranch = head.Trim();
+					// A detached HEAD reports the literal "HEAD" - not a branch; leave empty (= repo default).
+					string current = head.Trim();
+					if (current != "HEAD") _defaultBranch = current;
 				}
 			}
 			catch (Exception exception)
@@ -527,8 +537,8 @@ namespace Ateo.Build
 				Debug.Log("[New Definition] git branch enumeration failed (" + exception.Message + ") - using a free-text branch field.");
 			}
 
-			// Pre-fill "main" only for the free-text fallback (git failed); real defaulting happens in ApplySharedFields.
-			if (string.IsNullOrEmpty(_defaultBranch) && !_gitOk) _defaultBranch = "main";
+			// No "main" prefill when git failed: empty is the canonical "repo's default branch" (resolved
+			// agent-side), which is correct for any repo - a guessed "main" is not.
 		}
 
 		private IEnumerable<string> BranchOptions()

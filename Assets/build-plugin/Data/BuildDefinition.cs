@@ -60,7 +60,8 @@ namespace Ateo.Build
 			"file-based pipeline keyed by Consumes/Produces, separate from the BuildStep lists.")]
 		private List<PostBuildAction> _postBuildActions = new();
 
-		[SerializeField, Tooltip("Default VCS branch this definition builds when no commit/changeset override is given.")]
+		[SerializeField, Tooltip("Default VCS branch this definition builds when no commit/changeset override is given. " +
+			"A bare branch name (e.g. \"main\", no origin/ prefix); empty = the repo's default branch.")]
 		private string _defaultBranch;
 
 		[SerializeField, Tooltip("Fully-qualified static method (e.g. \"AndroidBuilder.BuildFromCommandLine\") to call " +

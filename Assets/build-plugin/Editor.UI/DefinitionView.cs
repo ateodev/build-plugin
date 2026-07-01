@@ -228,7 +228,8 @@ namespace Ateo.Build
 				using (new EditorGUI.DisabledScope(_target == TriggerTarget.Local))
 				{
 					_changeset = EditorGUILayout.TextField(
-						new GUIContent("Changeset / ref", "Server-only: git SHA/branch or Plastic changeset (unitybuild.vcs.ref). Empty = default branch HEAD."),
+						new GUIContent("Changeset / ref", "Server-only: git SHA/branch or Plastic changeset (unitybuild.vcs.ref). " +
+							"Empty = the definition's Default Branch (or, if that is empty too, the repo's default branch)."),
 						_changeset);
 				}
 			}
@@ -570,6 +571,19 @@ namespace Ateo.Build
 				properties["unitybuild.vcs.ref"] = _changeset;
 				properties["unitybuild.vcs.refType"] = _owner.Project != null && _owner.Project.Vcs == VcsKind.Plastic ? "changeset" : "commit";
 			}
+			else
+			{
+				// No explicit override: build the definition's default branch. Normalized because the agent
+				// resolves BARE branch names to origin/<branch> itself - an "origin/"-prefixed value is the
+				// legacy workaround form some committed assets still carry (they are not rewritten). Empty
+				// after normalization = send nothing, the agent resolves the repo's default branch.
+				string branch = VcsBranch.Normalize(_definition.DefaultBranch);
+				if (!string.IsNullOrEmpty(branch))
+				{
+					properties["unitybuild.vcs.ref"] = branch;
+					properties["unitybuild.vcs.refType"] = "branch";
+				}
+			}
 
 			string skip = SkipSet();
 			if (!string.IsNullOrEmpty(skip)) properties["unitybuild.actions.skip"] = skip;
@@ -743,5 +757,25 @@ namespace Ateo.Build
 		}
 
 		#endregion
+	}
+
+	/// <summary>
+	/// Canonical form of a definition's default branch (and of any branch sent as <c>unitybuild.vcs.ref</c>):
+	/// a BARE branch name ("main"); empty = the repo's default branch, resolved agent-side. The agent resolves
+	/// bare names to <c>origin/&lt;branch&gt;</c> itself, so an "origin/"-prefixed value - the pre-canonical
+	/// workaround some committed definition assets still carry - is stripped at the consumption points
+	/// (trigger send, wizard write) instead of rewriting those assets.
+	/// </summary>
+	internal static class VcsBranch
+	{
+		private const string LegacyRemotePrefix = "origin/";
+
+		public static string Normalize(string branch)
+		{
+			string trimmed = branch != null ? branch.Trim() : "";
+			return trimmed.StartsWith(LegacyRemotePrefix, StringComparison.Ordinal)
+				? trimmed.Substring(LegacyRemotePrefix.Length)
+				: trimmed;
+		}
 	}
 }
