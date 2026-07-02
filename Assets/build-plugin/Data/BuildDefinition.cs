@@ -8,9 +8,10 @@ using UnityEditor.Build.Profile;
 namespace Ateo.Build
 {
 	/// <summary>
-	/// One buildable thing ("Android AAB Release", "iOS Xcode", "Android APK Cheat"), authored in the Editor
-	/// and COMMITTED to the game repo under Assets/BuildConfigs/. The CI side never grows a config per
-	/// variant - it passes this definition's name as the <c>unitybuild.definition</c> build parameter, and
+	/// One buildable thing ("AAB Release", "Xcode", "APK Cheat"), authored in the Editor and COMMITTED to the
+	/// game repo under Assets/BuildConfigs/&lt;platform&gt;/ (the folder states the platform; the name stays
+	/// bare - see <see cref="DefinitionNaming"/>). The CI side never grows a config per variant - it passes
+	/// the definition asset's GUID as the <c>unitybuild.definitionId</c> build parameter, and
 	/// <see cref="BuildRunner"/> loads and applies it. Wraps a Unity 6 Build Profile (preferred) and adds what
 	/// profiles don't cover: output naming/versioning, signing references, an ordered list of pre/post steps,
 	/// and an optional named-method shim for a game's existing headless builder.
@@ -24,7 +25,8 @@ namespace Ateo.Build
 	{
 		#region Fields
 
-		[SerializeField, Tooltip("Unique name. Passed as the unitybuild.definition build parameter and used to locate this asset.")]
+		[SerializeField, Tooltip("Bare definition name (never contains the platform - the asset's folder does that). " +
+			"Equals the asset file name; unique per platform folder. Human-facing contexts show '<platform> - <name>'.")]
 		private string _definitionName;
 
 		[SerializeField, Tooltip("Override the Unity editor version for THIS definition only (e.g. \"6000.0.58f2\"). " +

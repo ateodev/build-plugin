@@ -86,11 +86,13 @@ namespace Ateo.Build
 					Application.OpenURL(_owner.ResolveServerLink(build.WebUrl));
 				}
 
-				bool isThisProject = _owner.Project != null && build.Definition != null &&
+				// Jump resolves via the machine identity (unitybuild.definitionId -> asset GUID); the recorded
+				// display label is never parsed. Builds that predate the id property simply offer no jump.
+				bool isThisProject = _owner.Project != null && !string.IsNullOrEmpty(build.DefinitionId) &&
 					(string.IsNullOrEmpty(build.Project) || build.Project == _owner.Project.ProjectKey);
 				if (isThisProject && GUILayout.Button("Jump", GUILayout.Width(50)))
 				{
-					_owner.SelectDefinitionByName(build.Definition);
+					_owner.SelectDefinitionById(build.DefinitionId);
 				}
 
 				if (GUILayout.Button("Cancel", GUILayout.Width(60))) CancelBuild(build);

@@ -90,6 +90,7 @@ namespace Ateo.Build
 				if (definition == null) continue;
 
 				DefinitionView view = GetOrCreateView(definition);
+				// Names are bare ("Test") - the platform is the group header, so the row shows the name as-is.
 				string path = GroupLabel(definition.Platform) + "/" + definition.DefinitionName;
 				tree.Add(path, view);
 			}
@@ -318,12 +319,21 @@ namespace Ateo.Build
 			TrySelectMenuItemWithObject(view);
 		}
 
-		/// <summary>Rebuild the sidebar (re-scanning assets) and select the newly-created definition - the create-definition wizard's completion hook.</summary>
-		internal void RefreshAndSelect(string definitionName)
+		/// <summary>
+		/// Rebuild the sidebar (re-scanning assets) and select the newly-created definition BY ASSET PATH - the
+		/// create-definition wizard's completion hook. Path, not name: bare names are only unique per platform,
+		/// so a name lookup could land on another platform's same-named definition.
+		/// </summary>
+		internal void RefreshAndSelect(string assetPath)
 		{
 			_paneOverride = null;
 			ForceMenuTreeRebuild();
-			if (!string.IsNullOrEmpty(definitionName)) SelectDefinitionByName(definitionName);
+
+			BuildDefinition created = string.IsNullOrEmpty(assetPath)
+				? null
+				: AssetDatabase.LoadAssetAtPath<BuildDefinition>(assetPath);
+			if (created != null) SelectDefinition(created);
+
 			Repaint();
 		}
 
@@ -334,19 +344,17 @@ namespace Ateo.Build
 			ShowOverride(_settingsView ??= new SettingsView());
 		}
 
-		/// <summary>Jump to a definition by its name (Activity's jump action for this project's game).</summary>
-		internal void SelectDefinitionByName(string definitionName)
+		/// <summary>Jump to a definition by its asset GUID - the <c>unitybuild.definitionId</c> machine identity
+		/// (Activity's jump action for this project's game).</summary>
+		internal void SelectDefinitionById(string definitionId)
 		{
-			if (string.IsNullOrEmpty(definitionName)) return;
+			if (string.IsNullOrEmpty(definitionId)) return;
 
-			foreach (BuildDefinition definition in _definitions)
-			{
-				if (definition != null && definition.DefinitionName == definitionName)
-				{
-					SelectDefinition(definition);
-					return;
-				}
-			}
+			string path = AssetDatabase.GUIDToAssetPath(definitionId);
+			if (string.IsNullOrEmpty(path)) return;
+
+			BuildDefinition definition = AssetDatabase.LoadAssetAtPath<BuildDefinition>(path);
+			if (definition != null) SelectDefinition(definition);
 		}
 
 		#endregion

@@ -19,7 +19,9 @@ namespace Ateo.Build
 	/// <summary>
 	/// The create-definition wizard (§13.2), a floating <see cref="OdinEditorWindow"/> opened from the Build
 	/// Panel's <c>+ Add Build Definition</c> button. It owns SO creation to a buildable state: pick a target
-	/// (the concrete <see cref="BuildDefinition"/> subclass), name it (unique under Assets/BuildConfigs/), choose
+	/// (the concrete <see cref="BuildDefinition"/> subclass), name it (a BARE name - the docked platform prefix
+	/// only PREVIEWS the composed display label, see <see cref="DefinitionNaming"/> - written to
+	/// <c>Assets/BuildConfigs/&lt;token&gt;/&lt;name&gt;.asset</c>, unique per platform folder), choose
 	/// the build source (Build Profile or a manual scenes+defines list), pick a default branch (enumerated from
 	/// the repo), and - for iOS/Android - wire signing (create a keystore via <c>keytool</c> and provision it as
 	/// a secret, or reference an existing one). <c>Create</c> writes the correctly-typed asset and selects it in
@@ -63,9 +65,45 @@ namespace Ateo.Build
 		[ShowInInspector, DisplayAsString, LabelText("Creates")]
 		private string CreatesTypeName => TypeForTarget(_target)?.Name ?? "(none)";
 
-		[BoxGroup("Name"), HideLabel, PropertyOrder(2)]
-		[SerializeField, Tooltip("Unique definition name. Becomes Assets/BuildConfigs/<name>.asset and the unitybuild.definition parameter.")]
-		private string _definitionName = "";
+		// The BARE definition name - exactly what gets stored and used as the asset file name. It never
+		// contains the platform: the platform lives in the asset's folder, so changing the target mid-wizard
+		// swaps the docked prefix label (and the destination folder) and what was typed survives untouched.
+		[SerializeField, HideInInspector] private string _definitionName = "";
+
+		// Custom-drawn so the platform token is a DOCKED, non-editable prefix label left of the field (visual:
+		// "Linux - [Test]"). The prefix PREVIEWS the composed display label users will see in Slack/TeamCity,
+		// so nobody is tempted to type the platform into the name. Illegal characters are blocked on the input
+		// EVENT: [OnValueChanged] fires on the backing field, but a focused IMGUI text field keeps its OWN edit
+		// buffer, so a post-hoc reformat wouldn't show until focus-loss (the project-setup wizard's project-key
+		// field pioneered this). A full sanitize on focus-loss handles paste + space collapse/trim.
+		[BoxGroup("Name"), PropertyOrder(2), OnInspectorGUI]
+		private void DrawDefinitionName()
+		{
+			const string controlName = "ateo.definitionName";
+			Event current = Event.current;
+			if (current.type == EventType.KeyDown && GUI.GetNameOfFocusedControl() == controlName
+				&& DefinitionNaming.IsIllegalCharacter(current.character))
+			{
+				current.Use();
+			}
+
+			using (new EditorGUILayout.HorizontalScope())
+			{
+				// Token + a bare hyphen: the separator's surrounding spaces come from the layout gap, so the
+				// label reads exactly like the composed display label "<token> - <name>".
+				GUIContent prefix = new GUIContent(_target.ToServerToken() + " -",
+					"Platform prefix preview (from the chosen target). Stored name and file name are just '<name>' - " +
+					"the platform comes from the asset's folder (" + DefinitionNaming.FolderFor(_target.ToServerToken()) +
+					"). Standalone contexts (Slack, TeamCity) show '" + _target.ToServerToken() +
+					DefinitionNaming.Separator + "<name>'.");
+				GUILayout.Label(prefix, GUILayout.Width(EditorStyles.label.CalcSize(prefix).x + 2f));
+
+				GUI.SetNextControlName(controlName);
+				_definitionName = EditorGUILayout.TextField(_definitionName);
+			}
+
+			if (GUI.GetNameOfFocusedControl() != controlName) _definitionName = DefinitionNaming.SanitizeName(_definitionName);
+		}
 
 		[BoxGroup("Build source"), EnumToggleButtons, HideLabel, PropertyOrder(3)]
 		[SerializeField, Tooltip("Profile = build a Unity 6 Build Profile; Manual = an explicit scene list + scripting defines.")]
@@ -161,15 +199,23 @@ namespace Ateo.Build
 
 		#region Create
 
+		// The composed display label ("<token> - <name>") for the HUMAN-FACING consumers (keystore DN, secret
+		// UsedBy) - composed on demand, never stored. Path-like consumers (asset path, keystore file name) use
+		// the bare _definitionName instead.
+		private string DisplayLabel => DefinitionNaming.ComposeDisplayLabel(_target.ToServerToken(), _definitionName);
+
 		[PropertyOrder(20), PropertySpace(8)]
 		[Button("Create", ButtonSizes.Large)]
 		private void Create()
 		{
 			_result = "";
 
-			if (string.IsNullOrWhiteSpace(_definitionName))
+			// Sanitize BEFORE validating: a whitespace/illegal-only entry must read as empty, not sneak through.
+			_definitionName = DefinitionNaming.SanitizeName(_definitionName);
+			if (string.IsNullOrEmpty(_definitionName))
 			{
-				_result = "Enter a definition name.";
+				_result = "Enter a definition name (at least one character after the '" +
+					_target.ToServerToken() + DefinitionNaming.Separator + "' prefix).";
 				return;
 			}
 
@@ -180,11 +226,15 @@ namespace Ateo.Build
 				return;
 			}
 
-			EnsureBuildConfigsFolder();
-			string assetPath = "Assets/BuildConfigs/" + _definitionName + ".asset";
-			if (AssetDatabase.LoadAssetAtPath<BuildDefinition>(assetPath) != null || File.Exists(assetPath))
+			string token = _target.ToServerToken();
+			EnsurePlatformFolder(token);
+
+			// Per-platform uniqueness IS the filesystem: one file per name per platform folder - no registry to
+			// keep in sync. (Relative Assets/ paths resolve because the editor's cwd is the project root.)
+			string assetPath = DefinitionNaming.FolderFor(token) + "/" + _definitionName + ".asset";
+			if (File.Exists(assetPath))
 			{
-				_result = "A definition named '" + _definitionName + "' already exists. Names must be unique.";
+				_result = "A " + token + " definition named '" + _definitionName + "' already exists.";
 				return;
 			}
 
@@ -205,7 +255,9 @@ namespace Ateo.Build
 			AssetDatabase.SaveAssets();
 			AssetDatabase.Refresh();
 
-			if (_owner != null) _owner.RefreshAndSelect(_definitionName);
+			// Select by ASSET PATH: bare names are only unique per platform, so a name lookup could land on
+			// another platform's same-named definition.
+			if (_owner != null) _owner.RefreshAndSelect(assetPath);
 
 			Debug.Log("[New Definition] Created " + type.Name + " at " + assetPath + ". " + _result);
 			Close();
@@ -226,7 +278,7 @@ namespace Ateo.Build
 
 		private void ApplySharedFields(BuildDefinition definition)
 		{
-			SetField(definition, "_definitionName", _definitionName);
+			SetField(definition, "_definitionName", _definitionName); // the BARE name - platform lives in the folder
 			// Canonical form (see VcsBranch): a bare branch name, "origin/"-stripped; empty is VALID and means
 			// the agent resolves the repo's actual default branch - so no hardcoded "main" guess is stored.
 			SetField(definition, "_defaultBranch", VcsBranch.Normalize(_defaultBranch));
@@ -274,7 +326,11 @@ namespace Ateo.Build
 			}
 
 			// Create-new path: generate a keystore, provision it + passwords as secrets, wire the references.
-			string relativePath = "keystores/" + _definitionName + ".keystore";
+			// Path-like consumer, so bare name joined with a plain "-" (never the " - " display separator in
+			// paths). The token IS included: keystores/ is one flat folder at the checkout root shared by all
+			// platforms, while names are only unique per platform - "<token>-<name>" restores uniqueness there
+			// without inventing per-platform subfolders for a folder that rarely holds more than a few files.
+			string relativePath = "keystores/" + _target.ToServerToken() + "-" + _definitionName + ".keystore";
 			string keystorePath = Path.Combine(BuildPanel.ProjectRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
 			bool generated = GenerateKeystore(keystorePath);
@@ -358,14 +414,16 @@ namespace Ateo.Build
 
 		private string BuildDistinguishedName()
 		{
+			// Default CN is the DISPLAY LABEL: a certificate is read standalone (keytool -list, Play Console),
+			// where a bare "Test" would not say which platform's definition it signs.
 			List<string> parts = new List<string>();
-			AddDnPart(parts, "CN", string.IsNullOrEmpty(_dnCommonName) ? _definitionName : _dnCommonName);
+			AddDnPart(parts, "CN", string.IsNullOrEmpty(_dnCommonName) ? DisplayLabel : _dnCommonName);
 			AddDnPart(parts, "OU", _dnOrgUnit);
 			AddDnPart(parts, "O", _dnOrg);
 			AddDnPart(parts, "L", _dnCity);
 			AddDnPart(parts, "ST", _dnState);
 			AddDnPart(parts, "C", _dnCountry);
-			return parts.Count > 0 ? string.Join(", ", parts) : "CN=" + _definitionName;
+			return parts.Count > 0 ? string.Join(", ", parts) : "CN=" + DisplayLabel;
 		}
 
 		private static void AddDnPart(List<string> parts, string key, string value)
@@ -485,7 +543,9 @@ namespace Ateo.Build
 				if (existing != null && existing.LogicalKey == logicalKey) return; // already registered
 			}
 
-			registry.Add(new SecretDeclaration(logicalKey, description, kind, reference, new[] { _definitionName }));
+			// UsedBy is human-facing (read standalone in the Secrets view), so record the display label - a
+			// bare "Test" would not say which platform's definition uses the secret.
+			registry.Add(new SecretDeclaration(logicalKey, description, kind, reference, new[] { DisplayLabel }));
 			EditorUtility.SetDirty(project);
 			AssetDatabase.SaveAssetIfDirty(project);
 		}
@@ -567,11 +627,18 @@ namespace Ateo.Build
 			}
 		}
 
-		private static void EnsureBuildConfigsFolder()
+		// Both levels via AssetDatabase (not Directory.CreateDirectory) so the folders get their .meta files
+		// immediately and the CreateAsset below never races the importer.
+		private static void EnsurePlatformFolder(string token)
 		{
-			if (!AssetDatabase.IsValidFolder("Assets/BuildConfigs"))
+			if (!AssetDatabase.IsValidFolder(DefinitionNaming.RootFolder))
 			{
 				AssetDatabase.CreateFolder("Assets", "BuildConfigs");
+			}
+
+			if (!AssetDatabase.IsValidFolder(DefinitionNaming.FolderFor(token)))
+			{
+				AssetDatabase.CreateFolder(DefinitionNaming.RootFolder, token);
 			}
 		}
 

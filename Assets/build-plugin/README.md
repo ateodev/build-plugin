@@ -71,7 +71,8 @@ The server runs the same headless entry point you can run yourself:
 ```
 Unity -batchmode -nographics -quit -projectPath <proj> \
       -executeMethod Ateo.Build.BuildRunner.Run \
-      -buildDefinition "<definition name>" \
+      -buildDefinitionId "<asset guid>" \
+      [-buildDefinition "<name>"]       # fallback lookup + display when no guid is given
       [-buildResult "<path>.json"]
 ```
 

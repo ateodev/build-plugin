@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0] - 2026-07-02
+### Changed (definition identity & naming - dev1-grilled redesign)
+- **A definition's machine identity is its asset GUID** (the .meta guid): the trigger sends `unitybuild.definitionId`; the agent and `BuildRunner -buildDefinitionId` resolve by guid; history/dedup filter by it. Renaming a definition file (or field) can no longer break anything.
+- **Names are bare and platform-free**: `_definitionName` = "Test", stored verbatim as the file name; the platform lives in the FOLDER - `Assets/BuildConfigs/<Token>/<Name>.asset` - so uniqueness-per-platform is enforced by the filesystem itself. The wizard writes there and shows the platform as a docked prefix preview (`Linux - [Test]`) so users don't type it themselves.
+- **Display label** `"<Token> - <Name>"` is composed on demand for standalone contexts (Slack headers, TeamCity history, `unitybuild.definition`) and never stored or parsed (name fallback for manual runs resolves via the structural folder path).
+- **Platform-exactly-once paths**: server output `.../<Target>/Builds/<Name>/<identity>/` (the checkout dir names the platform), local output `Builds/<Token>/<Name>/<identity>/`.
+- Definition name is read-only post-create; a folder-mismatch validation banner flags hand-moved assets.
+
 ## [0.10.0] - 2026-07-02
 ### Changed
 - **Server URL is now a per-user editor setting** (Build Panel Settings / project-setup wizard; EditorPrefs, default `https://build.ateonet.work`) - removed from `ProjectConfig` entirely. A committed URL can never be right for every machine; clones now work anywhere without touching project data. Separation principle: `ProjectConfig` = machine-independent project facts; `BuildServerSettings` = environment facts (token, server URL).

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Sirenix.OdinInspector;
+using Sirenix.OdinInspector.Editor;
 using Sirenix.Utilities.Editor;
 using UnityEditor;
 using UnityEngine;
@@ -54,7 +55,7 @@ namespace Ateo.Build
 
 		#endregion
 
-		#region Constructor
+		#region Constructor & Identity
 
 		public DefinitionView(BuildDefinition definition, BuildPanel owner)
 		{
@@ -64,8 +65,16 @@ namespace Ateo.Build
 		}
 
 		// Build-name field persists its last value per definition in EditorPrefs (a per-trigger convenience), so
-		// bumping "-4" -> "-5" survives reselect/reload but never touches the committed asset.
-		private string BuildNamePrefKey => "Ateo.Build.BuildName." + _definition.DefinitionName;
+		// bumping "-4" -> "-5" survives reselect/reload but never touches the committed asset. Keyed by the
+		// asset GUID (the machine identity): bare names are only unique per platform, so a name key would make
+		// same-named definitions on different platforms share one pref.
+		private string BuildNamePrefKey => "Ateo.Build.BuildName." + DefinitionId;
+
+		/// <summary>The definition's machine identity: its asset .meta GUID - the unitybuild.definitionId value.</summary>
+		private string DefinitionId => AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(_definition));
+
+		/// <summary>The on-demand display label ("Linux - Test") for standalone/human-facing contexts.</summary>
+		private string DisplayLabel => DefinitionNaming.ComposeDisplayLabel(_definition.Platform.ToServerToken(), _definition.DefinitionName);
 
 		#endregion
 
@@ -314,6 +323,7 @@ namespace Ateo.Build
 		[TabGroup("Tabs", "Configure"), OnInspectorGUI, PropertyOrder(0)]
 		private void DrawConfigureHeader()
 		{
+			DrawFolderValidation();
 			SirenixEditorGUI.BeginBox("Post-build actions");
 			{
 				EditorGUILayout.LabelField(
@@ -378,6 +388,23 @@ namespace Ateo.Build
 			AppendAction(action);
 		}
 
+		// The platform FOLDER is routing data: the asset's location under Assets/BuildConfigs/<token>/ is what
+		// states the definition's platform on disk (the stored name is bare), and per-platform name uniqueness
+		// is that folder's file listing. A definition living anywhere else (hand-moved, pre-convention) breaks
+		// both, so it is an authoring ERROR to surface loudly, not a cosmetic nit. The name field itself stays
+		// locked (see BuildDefinitionNameLock); the fix here is a plain asset move.
+		private void DrawFolderValidation()
+		{
+			string token = _definition.Platform.ToServerToken();
+			string expectedFolder = DefinitionNaming.FolderFor(token);
+			string assetPath = AssetDatabase.GetAssetPath(_definition);
+			if (assetPath.StartsWith(expectedFolder + "/", StringComparison.Ordinal)) return;
+
+			EditorGUILayout.HelpBox("This " + token + " definition lives in the wrong folder ('" + assetPath +
+				"') - move it to " + expectedFolder + "/.", MessageType.Error);
+			GUILayout.Space(4);
+		}
+
 		// The inline editor above draws _notificationTargetOverride like every other definition field; this adds
 		// the authoring-time validation a plain serialized field can't carry (Data stays editor/Odin-free).
 		[TabGroup("Tabs", "Configure"), OnInspectorGUI, PropertyOrder(2)]
@@ -425,7 +452,8 @@ namespace Ateo.Build
 				{
 					using (TeamCityClient client = owner.NewClient())
 					{
-						List<BuildStatus> builds = await client.ListBuildsAsync(executor, projectKey, _definition.DefinitionName, 10);
+						// History is filtered by the machine identity (asset GUID) - names/labels are display-only.
+						List<BuildStatus> builds = await client.ListBuildsAsync(executor, projectKey, DefinitionId, 10);
 						foreach (BuildStatus build in builds)
 						{
 							BuildRow row = new BuildRow
@@ -448,8 +476,8 @@ namespace Ateo.Build
 				}
 			}
 
-			// On-disk builds (Builds/<definition>/<version>[_<buildNumber>]/, or a "b<number>" fallback folder for
-			// pre-identity downloads). A folder that matches a server build's identity folds into that row.
+			// On-disk builds (LOCAL layout Builds/<token>/<name>/<version>[_<buildNumber>]/, or a "b<number>"
+			// fallback folder for pre-identity downloads). A folder matching a server build's identity folds into that row.
 			string dir = BuildLayout.DefinitionDirectory(BuildPanel.ProjectRoot, _definition);
 			if (Directory.Exists(dir))
 			{
@@ -592,7 +620,11 @@ namespace Ateo.Build
 			Dictionary<string, string> properties = new Dictionary<string, string>
 			{
 				{ "unitybuild.project", _owner.Project != null ? _owner.Project.ProjectKey : "" },
-				{ "unitybuild.definition", _definition.DefinitionName },
+				// Identity vs label: definitionId (the asset's .meta GUID) is the machine key - lookup on the
+				// agent, history/dedupe filter here. definition is the composed display label ("Linux - Test"),
+				// recorded for humans (Slack, TeamCity UI) and never parsed by anything.
+				{ "unitybuild.definitionId", DefinitionId },
+				{ "unitybuild.definition", DisplayLabel },
 				// Per-build target platform token: a capability executor builds many platforms, so the checkout
 				// dir (<team>/<project>/<target>) and history need the platform for THIS build, not the executor's.
 				{ "unitybuild.target", _definition.Platform.ToServerToken() }
@@ -631,10 +663,10 @@ namespace Ateo.Build
 			using (TeamCityClient client = _owner.NewClient())
 			{
 				// §5.6 idempotency: an impatient re-click of the identical trigger (same executor, project,
-				// definition and ref) must not stack a second queue entry.
+				// definition and ref) must not stack a second queue entry. Matched on definitionId (the guid).
 				properties.TryGetValue("unitybuild.vcs.ref", out string vcsRef);
 				BuildStatus duplicate = await client.FindInFlightDuplicateAsync(
-					executor, properties["unitybuild.project"], _definition.DefinitionName, vcsRef);
+					executor, properties["unitybuild.project"], DefinitionId, vcsRef);
 				if (duplicate != null)
 				{
 					string label = !string.IsNullOrEmpty(duplicate.Number) ? "#" + duplicate.Number : "id " + duplicate.Id;
@@ -645,7 +677,7 @@ namespace Ateo.Build
 				}
 
 				long id = await client.TriggerBuildAsync(executor, properties);
-				_owner.SetStatus("Queued build " + id + " for '" + _definition.DefinitionName + "'.");
+				_owner.SetStatus("Queued build " + id + " for '" + DisplayLabel + "'.");
 				await LoadBuildsAsync(_owner);
 			}
 		}
@@ -794,6 +826,26 @@ namespace Ateo.Build
 		{
 			Local,
 			Server
+		}
+
+		#endregion
+	}
+
+	/// <summary>
+	/// Locks the Name field in the Configure tab's inline editor (and anywhere else Odin draws a
+	/// <see cref="BuildDefinition"/>): the bare name is written once by the create-definition wizard and must
+	/// equal the asset's FILE NAME (the wizard's file-exists uniqueness check and the on-disk
+	/// <c>Builds/.../&lt;name&gt;/</c> folders both key on it), so hand-editing the serialized field would
+	/// silently desync it from the file. Injected via an Odin attribute processor because Data stays
+	/// Odin-free - <see cref="BuildDefinition"/> itself cannot carry the [ReadOnly].
+	/// </summary>
+	internal sealed class BuildDefinitionNameLock : OdinAttributeProcessor<BuildDefinition>
+	{
+		#region OdinAttributeProcessor
+
+		public override void ProcessChildMemberAttributes(InspectorProperty parentProperty, MemberInfo member, List<Attribute> attributes)
+		{
+			if (member.Name == "_definitionName") attributes.Add(new ReadOnlyAttribute());
 		}
 
 		#endregion

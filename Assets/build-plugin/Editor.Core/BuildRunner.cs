@@ -19,41 +19,65 @@ namespace Ateo.Build
 	/// <summary>
 	/// The single generic headless entry point (L2). CI always calls the SAME method regardless of game or
 	/// platform:
-	///   Unity ... -executeMethod Ateo.Build.BuildRunner.Run -buildDefinition "Android-AAB-Release"
-	///             [-buildResult "&lt;path&gt;.json"]
-	/// It loads the named <see cref="BuildDefinition"/> from the project, applies it (target, defines, version
-	/// stamp, signing), runs pre-steps, builds (built-in or via a game's own method shim), runs post-steps,
-	/// writes a machine-readable <see cref="BuildResult"/>, and sets the process exit code. The exact same
-	/// path runs for an in-editor local build via <see cref="RunDefinition"/> - that local/CI parity is the
-	/// whole point.
+	///   Unity ... -executeMethod Ateo.Build.BuildRunner.Run -buildDefinitionId "&lt;asset guid&gt;"
+	///             [-buildDefinition "&lt;name&gt;"] [-buildResult "&lt;path&gt;.json"]
+	/// The guid (the definition asset's .meta GUID, sent as <c>unitybuild.definitionId</c>) is the PRIMARY
+	/// selector - resolved via the AssetDatabase, immune to renames/moves. <c>-buildDefinition</c> remains a
+	/// name FALLBACK (see <see cref="FindDefinition"/>). The runner applies the definition (target, defines,
+	/// version stamp, signing), runs pre-steps, builds (built-in or via a game's own method shim), runs
+	/// post-steps, writes a machine-readable <see cref="BuildResult"/>, and sets the process exit code. The
+	/// exact same path runs for an in-editor local build via <see cref="RunDefinition"/> - that local/CI
+	/// parity is the whole point.
 	/// </summary>
 	public static class BuildRunner
 	{
 		#region Public Methods
 
-		/// <summary>CI entry. Reads -buildDefinition / -buildResult from the command line.</summary>
+		/// <summary>CI entry. Reads -buildDefinitionId (primary) / -buildDefinition (fallback) / -buildResult
+		/// from the command line.</summary>
 		public static void Run()
 		{
+			string definitionId = GetArg("-buildDefinitionId");
 			string definitionName = GetArg("-buildDefinition");
 			string resultPath = GetArg("-buildResult");
 			BuildResult result;
 
 			try
 			{
-				if (string.IsNullOrEmpty(definitionName)) throw new Exception("Missing -buildDefinition <name> argument.");
-
-				BuildDefinition definition = FindDefinition(definitionName);
-				if (definition == null)
+				BuildDefinition definition;
+				if (!string.IsNullOrEmpty(definitionId))
 				{
-					throw new Exception("Build definition '" + definitionName + "' not found. Expected a BuildDefinition " +
-						"asset whose name == '" + definitionName + "' (usually under Assets/BuildConfigs/).");
+					// PRIMARY: the asset GUID (unitybuild.definitionId) - unique by construction and immune to
+					// display/name changes, so the agent never has to reason about names or folders.
+					string assetPath = AssetDatabase.GUIDToAssetPath(definitionId);
+					definition = string.IsNullOrEmpty(assetPath) ? null : AssetDatabase.LoadAssetAtPath<BuildDefinition>(assetPath);
+					if (definition == null)
+					{
+						throw new Exception("Build definition with GUID '" + definitionId + "' not found. Expected a " +
+							"BuildDefinition asset with that .meta guid (under Assets/BuildConfigs/<platform>/). Is the " +
+							"checkout on a revision that contains it?");
+					}
+				}
+				else if (!string.IsNullOrEmpty(definitionName))
+				{
+					definition = FindDefinition(definitionName);
+					if (definition == null)
+					{
+						throw new Exception("Build definition '" + definitionName + "' not found. Expected a BuildDefinition " +
+							"asset whose Definition Name matches (usually Assets/BuildConfigs/<platform>/<name>.asset). " +
+							"A composed '<platform> - <name>' label is also accepted.");
+					}
+				}
+				else
+				{
+					throw new Exception("Missing -buildDefinitionId <guid> (or fallback -buildDefinition <name>) argument.");
 				}
 
 				result = RunDefinition(definition);
 			}
 			catch (Exception exception)
 			{
-				result = BuildResult.Failed(definitionName, exception.ToString());
+				result = BuildResult.Failed(string.IsNullOrEmpty(definitionName) ? definitionId : definitionName, exception.ToString());
 				Debug.LogError("[Build] FAILED: " + exception);
 			}
 
@@ -818,9 +842,16 @@ namespace Ateo.Build
 					.Replace("{version}", context.VersionName)
 					.Replace("{code}", context.VersionCode.ToString());
 
-			// The one shared §12.2 layout: Builds/<definition>/<version>[_<buildNumber>]/. Identical for local
-			// output and unarchived downloads, so a download lands byte-identical in the same folder.
-			string directory = BuildLayout.BuildDirectory(CheckoutRoot(), definition, context.VersionName, context.VersionCode, context.BuildName);
+			// Platform-exactly-once (§12.2): definition names are bare, so the full path must state the platform
+			// exactly once. SERVER (batch/CI): the checkout dir BUILD_CHECKOUT_ROOT already names the platform
+			// (<team>/<project>/<target>), so output is Builds/<name>/<identity>/ - a token segment would say it
+			// twice. LOCAL (in-process editor build): the project root names no platform, so output is
+			// Builds/<token>/<name>/<identity>/ under the project root - which also matches where the panel
+			// looks for on-disk builds and places downloads (BuildLayout.DefinitionDirectory).
+			string identity = BuildLayout.FolderName(definition, context.VersionName, context.VersionCode, context.BuildName);
+			string directory = context.IsBatchMode
+				? Path.Combine(BuildLayout.ServerDefinitionDirectory(CheckoutRoot(), definition), identity)
+				: Path.Combine(BuildLayout.DefinitionDirectory(ProjectRoot(), definition), identity);
 			Directory.CreateDirectory(directory);
 			return Path.Combine(directory, fileName + extension);
 		}
@@ -829,16 +860,60 @@ namespace Ateo.Build
 
 		#region Private Methods - Discovery
 
-		private static BuildDefinition FindDefinition(string definitionName)
+		/// <summary>
+		/// Name FALLBACK for <c>-buildDefinition</c> (the guid arg is primary). Accepts the bare stored name
+		/// ("Test") or a composed display label ("Linux - Test") - someone pasting the label they saw in
+		/// Slack/TeamCity should still resolve. Bare names are only unique PER PLATFORM (the platform folder is
+		/// the uniqueness scope), so when several platforms carry the same name the definition in the ACTIVE
+		/// build target's token folder wins - the only one this Unity process could build anyway.
+		/// </summary>
+		private static BuildDefinition FindDefinition(string input)
 		{
+			List<BuildDefinition> all = new List<BuildDefinition>();
 			foreach (string guid in AssetDatabase.FindAssets("t:" + nameof(BuildDefinition)))
 			{
-				string path = AssetDatabase.GUIDToAssetPath(guid);
-				BuildDefinition definition = AssetDatabase.LoadAssetAtPath<BuildDefinition>(path);
-				if (definition != null && definition.DefinitionName == definitionName) return definition;
+				BuildDefinition loaded = AssetDatabase.LoadAssetAtPath<BuildDefinition>(AssetDatabase.GUIDToAssetPath(guid));
+				if (loaded != null) all.Add(loaded);
 			}
 
-			return null;
+			// 1) Exact bare-name match on the FULL input first: a legal bare name may itself contain " - ",
+			//    so splitting eagerly could shadow a real definition.
+			List<BuildDefinition> matches = all.FindAll(candidate => candidate.DefinitionName == input);
+
+			// 2) Composed "<token> - <name>" input: split on the display separator; the token half must be the
+			//    definition's platform token, the name half its bare name.
+			if (matches.Count == 0)
+			{
+				int separator = input.IndexOf(DefinitionNaming.Separator, StringComparison.Ordinal);
+				if (separator > 0)
+				{
+					string token = input.Substring(0, separator);
+					string name = input.Substring(separator + DefinitionNaming.Separator.Length);
+					matches = all.FindAll(candidate =>
+						candidate.DefinitionName == name && candidate.Platform.ToServerToken() == token);
+				}
+			}
+
+			if (matches.Count <= 1) return matches.Count == 1 ? matches[0] : null;
+
+			// 3) Ambiguous bare name across platforms: prefer the definition sitting in ITS OWN token folder
+			//    whose platform matches the active build target (+ subtarget - Windows and WindowsServer share
+			//    a BuildTarget and differ only by subtarget).
+			foreach (BuildDefinition match in matches)
+			{
+				if (match.Platform.ToBuildTarget() != EditorUserBuildSettings.activeBuildTarget) continue;
+				if (match.Platform.ToBuildTargetGroup() == BuildTargetGroup.Standalone
+					&& match.Platform.ToSubtarget() != EditorUserBuildSettings.standaloneBuildSubtarget) continue;
+
+				string expectedFolder = DefinitionNaming.FolderFor(match.Platform.ToServerToken()) + "/";
+				if (AssetDatabase.GetAssetPath(match).StartsWith(expectedFolder, StringComparison.Ordinal)) return match;
+			}
+
+			// Still ambiguous: first match, loudly - the guid arg exists precisely to make this impossible.
+			Debug.LogWarning("[Build] definition name '" + input + "' is ambiguous across platforms and none matches " +
+				"the active build target's folder - using '" + AssetDatabase.GetAssetPath(matches[0]) + "'. " +
+				"Prefer -buildDefinitionId <guid>.");
+			return matches[0];
 		}
 
 		private static ProjectConfig FindProjectConfig()
@@ -874,7 +949,13 @@ namespace Ateo.Build
 		private static string CheckoutRoot()
 		{
 			string root = Environment.GetEnvironmentVariable("BUILD_CHECKOUT_ROOT");
-			return string.IsNullOrEmpty(root) ? Directory.GetParent(Application.dataPath).FullName : root;
+			return string.IsNullOrEmpty(root) ? ProjectRoot() : root;
+		}
+
+		/// <summary>The Unity project root (parent of Assets) - the anchor of the LOCAL Builds/ layout.</summary>
+		private static string ProjectRoot()
+		{
+			return Directory.GetParent(Application.dataPath).FullName;
 		}
 
 		private static string GetArg(string flag)

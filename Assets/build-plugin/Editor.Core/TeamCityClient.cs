@@ -71,15 +71,18 @@ namespace Ateo.Build
 		}
 
 		/// <summary>Recent builds of <paramref name="buildTypeId"/>, filtered to one project key and (optionally) one
-		/// definition - so a definition's history shows ITS builds, not every build the shared executor ran.</summary>
-		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string projectKey, string definitionName, int count = 20)
+		/// definition by its <c>unitybuild.definitionId</c> (the definition asset's GUID - the machine identity;
+		/// the recorded display label is human-facing and never filtered on) - so a definition's history shows
+		/// ITS builds, not every build the shared executor ran.</summary>
+		public async Task<List<BuildStatus>> ListBuildsAsync(string buildTypeId, string projectKey, string definitionId, int count = 20)
 		{
 			// defaultFilter:false + state:any: the default build locator returns only FINISHED builds on the
 			// default branch - a just-triggered queued/running build (and canceled history) would be invisible
 			// and the panel's focused poll would never engage.
 			string locator = "buildType:(id:" + buildTypeId + "),defaultFilter:false,state:any";
 			if (!string.IsNullOrEmpty(projectKey)) locator += ",property:(name:unitybuild.project,value:" + LocatorValue(projectKey) + ")";
-			if (!string.IsNullOrEmpty(definitionName)) locator += ",property:(name:unitybuild.definition,value:" + LocatorValue(definitionName) + ")";
+			// A GUID has no locator-reserved characters, so LocatorValue passes it verbatim (harmlessly kept for symmetry).
+			if (!string.IsNullOrEmpty(definitionId)) locator += ",property:(name:unitybuild.definitionId,value:" + LocatorValue(definitionId) + ")";
 			locator += ",count:" + count;
 
 			string json = await GetAsync("/app/rest/builds?locator=" + Uri.EscapeDataString(locator) +
@@ -127,17 +130,18 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The first queued/running build identical to a would-be trigger (same executor, project, definition
-		/// AND vcs ref), or null (§5.6 idempotency - the panel skips the POST instead of stacking a duplicate).
-		/// Compared on the raw trigger properties here because <see cref="BuildStatus"/> does not carry the ref.
+		/// The first queued/running build identical to a would-be trigger (same executor, project, definition -
+		/// by <c>unitybuild.definitionId</c> - AND vcs ref), or null (§5.6 idempotency - the panel skips the
+		/// POST instead of stacking a duplicate). Compared on the raw trigger properties here because
+		/// <see cref="BuildStatus"/> does not carry the ref.
 		/// </summary>
 		public async Task<BuildStatus> FindInFlightDuplicateAsync(string buildTypeId, string projectKey,
-			string definitionName, string vcsRef)
+			string definitionId, string vcsRef)
 		{
 			(BuildListDto queue, BuildListDto running) = await FetchInFlightAsync();
 
-			return FindDuplicate(queue, buildTypeId, projectKey, definitionName, vcsRef)
-				?? FindDuplicate(running, buildTypeId, projectKey, definitionName, vcsRef);
+			return FindDuplicate(queue, buildTypeId, projectKey, definitionId, vcsRef)
+				?? FindDuplicate(running, buildTypeId, projectKey, definitionId, vcsRef);
 		}
 
 		/// <summary>
@@ -340,7 +344,7 @@ namespace Ateo.Build
 		}
 
 		private static BuildStatus FindDuplicate(BuildListDto list, string buildTypeId, string projectKey,
-			string definitionName, string vcsRef)
+			string definitionId, string vcsRef)
 		{
 			if (list == null || list.build == null) return null;
 
@@ -348,7 +352,7 @@ namespace Ateo.Build
 			{
 				if (dto.buildTypeId != buildTypeId) continue;
 				if (!PropertyEquals(dto, "unitybuild.project", projectKey)) continue;
-				if (!PropertyEquals(dto, "unitybuild.definition", definitionName)) continue;
+				if (!PropertyEquals(dto, "unitybuild.definitionId", definitionId)) continue;
 				if (!PropertyEquals(dto, "unitybuild.vcs.ref", vcsRef)) continue;
 
 				return ToStatus(dto);
@@ -403,6 +407,7 @@ namespace Ateo.Build
 				BuildTypeId = dto.buildTypeId,
 				Agent = dto.agent != null ? dto.agent.name : null,
 				Project = FindProperty(dto.properties, "unitybuild.project"),
+				DefinitionId = FindProperty(dto.properties, "unitybuild.definitionId"),
 				Definition = FindProperty(dto.properties, "unitybuild.definition"),
 				VersionName = FindProperty(dto.resultingProperties, "unitybuild.version.name"),
 				VersionCode = ParseInt(FindProperty(dto.resultingProperties, "unitybuild.version.code")),
