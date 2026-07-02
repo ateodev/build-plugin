@@ -159,23 +159,42 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The ONE removal-confirm text, shared by the Secrets view's Remove button and the manage dialog's
-		/// Delete verb (dev1: identical wording, stated once - never duplicated per call site). Always states
+		/// The ONE unassign-confirm text, shared by the Secrets view's Unassign button and the manage dialog's
+		/// Unassign verb (dev1: identical wording, stated once - never duplicated per call site). Always states
 		/// the entry-only rule (the vault item is untouched); when <paramref name="consumers"/> is non-empty the
 		/// key is still NEEDED, so the consequences are spelled out too - who needs it, the row falling back to
 		/// 'not registered', builds failing until re-registered. Empty consumers = the simple orphan-entry form.
 		/// </summary>
-		public static string RemoveConfirmMessage(string logicalKey, IReadOnlyList<string> consumers)
+		public static string UnassignConfirmMessage(string logicalKey, IReadOnlyList<string> consumers)
 		{
-			string message = "Remove '" + logicalKey + "' from the project's secret registry?\n\n" +
-				"Only the registry entry is removed - the secret in the vault is untouched.";
+			return "Unassign '" + logicalKey + "' from the project's secret registry?\n\n" +
+				"Only the registry entry is removed - the secret in the vault is untouched." +
+				StillNeededConsequences(logicalKey, consumers);
+		}
 
-			if (consumers == null || consumers.Count == 0) return message;
+		/// <summary>
+		/// The manage dialog's DELETE-confirm text - the destructive sibling of
+		/// <see cref="UnassignConfirmMessage"/>, built here so both verbs' wording lives side by side. Names the
+		/// vault item VERBATIM (dev1: he must recognize exactly what disappears, e.g.
+		/// 'build-plugin-test_steam-user'), states that the assignment goes with it, inserts a CAUTION when the
+		/// caller detected the item as shared (<paramref name="sharedReason"/> says WHY - two shapes exist:
+		/// another registry entry points at it, or a bare un-prefixed title marks it team-level), and appends
+		/// the same still-needed consequences as an unassign.
+		/// </summary>
+		public static string DeleteConfirmMessage(string logicalKey, string item, string sharedReason,
+			IReadOnlyList<string> consumers)
+		{
+			string message = "Delete the vault item '" + item + "'?\n\n" +
+				"The whole item is deleted from the vault, and the registry entry for '" + logicalKey +
+				"' is removed with it.";
 
-			return message + "\n\n" +
-				"'" + logicalKey + "' is still needed by: " + string.Join("; ", consumers) + ".\n" +
-				"The row falls back to 'not registered' and builds that need this key will FAIL until it is " +
-				"registered again.";
+			if (!string.IsNullOrEmpty(sharedReason))
+			{
+				message += "\n\nCAUTION: this item looks SHARED - " + sharedReason + ". Deleting it may break " +
+					"other consumers beyond this project's entry.";
+			}
+
+			return message + StillNeededConsequences(logicalKey, consumers);
 		}
 
 		/// <summary>Every <see cref="BuildDefinition"/> asset in the project - the demand universe for project-wide
@@ -195,6 +214,18 @@ namespace Ateo.Build
 		#endregion
 
 		#region Private Methods
+
+		/// <summary>The shared still-needed tail of both confirms: who needs the key, the row falling back to
+		/// 'not registered', builds failing until re-registered. Empty for an orphan entry (nothing breaks).</summary>
+		private static string StillNeededConsequences(string logicalKey, IReadOnlyList<string> consumers)
+		{
+			if (consumers == null || consumers.Count == 0) return string.Empty;
+
+			return "\n\n" +
+				"'" + logicalKey + "' is still needed by: " + string.Join("; ", consumers) + ".\n" +
+				"The row falls back to 'not registered' and builds that need this key will FAIL until it is " +
+				"registered again.";
+		}
 
 		/// <summary>Adds one definition's demanded keys: its actions' declared requirements + its wired signing keys.</summary>
 		private static void CollectFrom(BuildDefinition definition, Dictionary<string, NeededSecret> needed)

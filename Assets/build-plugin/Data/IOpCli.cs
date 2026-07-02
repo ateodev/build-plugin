@@ -37,5 +37,9 @@ namespace Ateo.Build
 		/// (string or document). String fields are always written as plain text (dev1 decision: vault access protects
 		/// values, not field masking); File values are stored as documents.</summary>
 		Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account);
+
+		/// <summary>Delete the item (by verbatim title) from the given vault (<c>op item delete</c>). Covers
+		/// document items too - a 1Password document IS an item. Backs <see cref="ISecretProvider.DeleteItemAsync"/>.</summary>
+		Task DeleteItemAsync(string vault, string item, string account);
 	}
 }

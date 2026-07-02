@@ -172,6 +172,14 @@ namespace Ateo.Build
 			}
 		}
 
+		public async Task DeleteItemAsync(string vault, string item, string account)
+		{
+			// 'op item delete' handles EVERY category, documents included (a document is an item) - no need to
+			// branch to 'op document delete'. No --archive: the panel's Delete verb means gone, not hidden.
+			OpResult result = await RunAsync(new[] { "item", "delete", item, "--vault", vault }, account);
+			if (result.ExitCode != 0) throw OpFailure("item delete", result);
+		}
+
 		#endregion
 
 		#region Private Methods

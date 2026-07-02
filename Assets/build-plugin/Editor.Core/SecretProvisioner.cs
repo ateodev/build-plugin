@@ -170,8 +170,9 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// Removes a registry ENTRY by logical key - the vault item behind its reference is deliberately left
-		/// untouched (removal un-declares the mapping; it never destroys secret material). Returns whether an
-		/// entry was removed. Saves the asset.
+		/// untouched (removal un-declares the mapping; it never destroys secret material). This is the UNASSIGN
+		/// verb's whole effect; the DELETE verb calls it too, but only AFTER the provider confirmed the vault
+		/// delete. Returns whether an entry was removed. Saves the asset.
 		/// </summary>
 		public static bool RemoveSecret(ProjectConfig project, string logicalKey)
 		{
@@ -219,6 +220,19 @@ namespace Ateo.Build
 			field = segments[segments.Length - 1];
 			item = segments.Length >= 3 ? segments[segments.Length - 2] : null;
 			return !string.IsNullOrEmpty(item) && ReferencesMatch(provider, item, field, SecretKind.String, reference);
+		}
+
+		/// <summary>
+		/// Recovers the vault ITEM TITLE behind an existing registry reference - the target of the manage
+		/// dialog's DELETE verb (<see cref="ISecretProvider.DeleteItemAsync"/> takes a verbatim title, never a
+		/// reference). Delegates to <see cref="TryGetWriteCoordinates"/> so the parsing AND the provider
+		/// round-trip guard exist once: a foreign-convention (or foreign-vault) pointer yields false instead of
+		/// a DELETE landing on an unintended item. Field-less document references are handled there too (their
+		/// last segment IS the item).
+		/// </summary>
+		public static bool TryGetItemName(ISecretProvider provider, SecretDeclaration declaration, out string item)
+		{
+			return TryGetWriteCoordinates(provider, declaration, out item, out _);
 		}
 
 		/// <summary>The project's single <see cref="ProjectConfig"/> asset, or null before onboarding.</summary>

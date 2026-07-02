@@ -10,8 +10,9 @@ namespace Ateo.Build
 	/// The one reusable secrets dialog (Secrets UX spec #3/#4): REGISTER a logical key (create a new vault item
 	/// by convention and write its value now, or point the registry at an existing vault item - no free-text
 	/// reference mode), MANAGE an assigned key (dev1: the one-stop surface behind the Secrets view's Edit
-	/// button - three verbs: CHANGE VALUE writes a new value to the existing reference, REASSIGN morphs
-	/// this same window into change-reference mode, DELETE removes the registry entry after a consequences
+	/// button - CHANGE VALUE writes a new value to the existing reference, plus the verb row REASSIGN (morphs
+	/// this same window into change-reference mode) / UNASSIGN (removes only the registry entry, vault
+	/// untouched) / DELETE (destroys the vault item itself AND the assignment), each behind a consequences
 	/// confirm), and CHANGE REFERENCE (the register UI over an EXISTING entry, key fixed - completing it
 	/// OVERWRITES the entry's reference, the escape hatch when the current one dangles or should point
 	/// elsewhere). Strictly WRITE-ONLY: values are entered masked and never read back or displayed. Opened from the
@@ -74,9 +75,10 @@ namespace Ateo.Build
 		/// <summary>
 		/// Open in MANAGE mode (the Secrets view's Edit button on a healthy row): the one-stop surface for an
 		/// ASSIGNED key. Primary verb is CHANGE VALUE (write a new value to <paramref name="declaration"/>'s
-		/// EXISTING reference - rotation; no naming, no registry change); REASSIGN morphs this window into
-		/// change-reference mode (see <see cref="OpenForChangeReference"/>); DELETE removes the registry entry
-		/// (vault untouched) behind a consequences confirm.
+		/// EXISTING reference - rotation; no naming, no registry change); the verb row is REASSIGN (morphs this
+		/// window into change-reference mode, see <see cref="OpenForChangeReference"/>), UNASSIGN (removes the
+		/// registry entry only - vault untouched) and DELETE (destroys the vault item AND the assignment), the
+		/// latter two behind consequences confirms.
 		/// </summary>
 		public static void OpenForSetValue(ProjectConfig project, SecretDeclaration declaration, Action onDone)
 		{
@@ -137,7 +139,7 @@ namespace Ateo.Build
 
 		private void Initialize(bool setValueOnly, SecretDeclaration declaration)
 		{
-			// Manage mode carries the extra verb row (Change value / Reassign / Delete) below the value input.
+			// Manage mode carries the extra verb row (Reassign / Unassign / Delete) below the value input.
 			minSize = new Vector2(460, setValueOnly ? 240 : 320);
 			_setValueOnly = setValueOnly;
 			_declaration = declaration;
@@ -146,6 +148,9 @@ namespace Ateo.Build
 
 			if (_setValueOnly && _declaration != null)
 			{
+				// One guarded parse feeds BOTH item-addressed verbs: Change value writes to (_writeItem,
+				// _writeField), Delete targets _writeItem's TITLE (SecretProvisioner.TryGetItemName is the same
+				// parse) - so a foreign-convention reference disables both alike.
 				_writeCoordsOk = _provider != null &&
 					SecretProvisioner.TryGetWriteCoordinates(_provider, _declaration, out _writeItem, out _writeField);
 			}
@@ -196,8 +201,8 @@ namespace Ateo.Build
 					: _provider.UnavailableHint, MessageType.Error);
 			}
 
-			// Manage mode scopes provider-availability itself: DELETE is a registry-only edit and must stay
-			// usable with the provider signed out (the view's Remove button works without one too).
+			// Manage mode scopes provider-availability itself: UNASSIGN is a registry-only edit and must stay
+			// usable with the provider signed out (the view's Unassign button works without one too).
 			if (_setValueOnly)
 			{
 				DrawManage();
@@ -345,7 +350,7 @@ namespace Ateo.Build
 			}
 		}
 
-		// --- Manage mode (assigned key: change value / reassign / delete) -----------------------------------
+		// --- Manage mode (assigned key: change value / reassign / unassign / delete) ------------------------
 
 		private void DrawManage()
 		{
@@ -354,12 +359,12 @@ namespace Ateo.Build
 
 			if (!_writeCoordsOk)
 			{
-				// No early return: an unrecoverable write target only kills CHANGE VALUE - Reassign is the
-				// remedy and Delete never needs coordinates, so the verb row below must still render.
+				// No early return: an unrecoverable item target only kills CHANGE VALUE and DELETE - Reassign
+				// is the remedy and Unassign never needs coordinates, so the verb row below must still render.
 				EditorGUILayout.HelpBox("This reference does not follow the provider's own convention (or points at " +
-					"different provider coordinates), so its write target cannot be recovered safely - the value " +
-					"cannot be changed here. Use Reassign to repoint the entry (or edit the value in the vault " +
-					"directly).", MessageType.Warning);
+					"different provider coordinates), so the item behind it cannot be recovered safely - the value " +
+					"cannot be changed here and Delete cannot target the vault item. Use Reassign to repoint the " +
+					"entry (or manage the item in the vault directly).", MessageType.Warning);
 			}
 			else
 			{
@@ -376,9 +381,11 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// The manage verb row (dev1 layout): the primary write button first, then - visually separated - the
-		/// entry-level verbs, Delete last. Each verb gates on exactly what it needs: Change value on a usable
-		/// provider AND recoverable write coordinates, Reassign on the provider only (it opens the register
-		/// write UI), Delete on nothing (a registry-only edit that must survive a signed-out provider).
+		/// entry-level verbs [Reassign][Unassign][Delete], the destructive one last. Each verb gates on exactly
+		/// what it needs: Change value on a usable provider AND recoverable write coordinates, Reassign on the
+		/// provider only (it opens the register write UI), Unassign on nothing (a registry-only edit that must
+		/// survive a signed-out provider), Delete on a usable provider AND a recoverable item title (it destroys
+		/// the vault item itself).
 		/// </summary>
 		private void DrawManageVerbs()
 		{
@@ -406,11 +413,29 @@ namespace Ateo.Build
 					}
 				}
 
-				if (GUILayout.Button(new GUIContent("Delete",
-					"Delete the registry entry for '" + _logicalKey + "' - the secret in the vault is untouched."),
+				if (GUILayout.Button(new GUIContent("Unassign",
+					"Remove the registry entry for '" + _logicalKey + "' - the secret in the vault is untouched."),
 					GUILayout.Height(26)))
 				{
-					DeleteAssignment();
+					UnassignEntry();
+				}
+
+				// The disabled tooltip carries the REASON (dev1 rule: a dead button must say why) - and points
+				// at Unassign, which stays available for the registry-only half of the intent.
+				string deleteBlocked = !_providerUsable
+					? "Provider not available - sign in to delete the vault item (Unassign works without it)."
+					: !_writeCoordsOk
+						? "The vault item behind this reference cannot be determined safely (non-convention " +
+							"reference) - delete it in the vault directly, or Unassign the entry here."
+						: null;
+				using (new EditorGUI.DisabledScope(deleteBlocked != null))
+				{
+					if (GUILayout.Button(new GUIContent("Delete",
+						deleteBlocked ?? ("Delete the vault item '" + _writeItem + "' AND remove the registry " +
+							"entry for '" + _logicalKey + "'.")), GUILayout.Height(26)))
+					{
+						DeleteVaultSecret();
+					}
 				}
 			}
 		}
@@ -532,22 +557,91 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The DELETE verb: removes the REGISTRY ENTRY only - the vault item behind the reference is
+		/// The UNASSIGN verb: removes the REGISTRY ENTRY only - the vault item behind the reference is
 		/// deliberately untouched (<see cref="SecretProvisioner.RemoveSecret"/>) - behind a consequences
 		/// confirm. Consumers are computed FRESH from the project's definitions (not a stale row snapshot),
 		/// so the confirm names exactly who still needs the key right now. On confirm: remove (saves the
 		/// asset), notify the opener (the Secrets view refreshes via onDone) and close.
 		/// </summary>
-		private void DeleteAssignment()
+		private void UnassignEntry()
 		{
-			bool confirmed = EditorUtility.DisplayDialog("Delete secret assignment?",
-				SecretDemand.RemoveConfirmMessage(_logicalKey, CurrentConsumers()),
-				"Delete", "Cancel");
+			bool confirmed = EditorUtility.DisplayDialog("Unassign secret?",
+				SecretDemand.UnassignConfirmMessage(_logicalKey, CurrentConsumers()),
+				"Unassign", "Cancel");
 			if (!confirmed) return;
 
 			SecretProvisioner.RemoveSecret(_project, _logicalKey);
 			_onDone?.Invoke();
 			Close();
+		}
+
+		/// <summary>
+		/// The DELETE verb: destroys the VAULT ITEM behind the reference (dev1's expectation: after Delete,
+		/// 'build-plugin-test_steam-user' is GONE from the vault) and removes the registry entry with it.
+		/// Ordering is deliberate - vault first, registry second: a failed vault delete leaves the entry and the
+		/// vault exactly as they were, with the error surfaced; nothing is ever half-deleted. The confirm names
+		/// the item verbatim and carries a CAUTION when the item looks shared (<see cref="SharedItemReason"/>).
+		/// </summary>
+		private void DeleteVaultSecret()
+		{
+			bool confirmed = EditorUtility.DisplayDialog("Delete vault secret?",
+				SecretDemand.DeleteConfirmMessage(_logicalKey, _writeItem, SharedItemReason(_writeItem), CurrentConsumers()),
+				"Delete", "Cancel");
+			if (!confirmed) return;
+
+			_error = "";
+			try
+			{
+				// WizardShell.RunSync is Task<T>-shaped; wrap the void delete so it still runs off the Editor
+				// main thread (same deadlock rationale as every other provider call here).
+				WizardShell.RunSync(async () =>
+				{
+					await _provider.DeleteItemAsync(_writeItem);
+					return true;
+				});
+
+				SecretProvisioner.RemoveSecret(_project, _logicalKey);
+				_onDone?.Invoke();
+				Close();
+			}
+			catch (Exception exception)
+			{
+				_error = "Could not delete the vault item: " + exception.Message + " Nothing was removed.";
+			}
+		}
+
+		/// <summary>
+		/// Why deleting <paramref name="item"/> could break MORE than this project's entry - null when it looks
+		/// safely project-owned. Two shared shapes exist: another registry entry resolves to the SAME item (two
+		/// logical keys, one item - deleting for one silently breaks the other), detected by recovering every
+		/// other entry's item title through the same guarded parse; or the title lacks the '&lt;project-key&gt;_'
+		/// prefix - by the naming convention (<see cref="SecretProvisioner.ItemNameFor(ProjectConfig,string)"/>)
+		/// only team-level/reusable items are bare-named, and OTHER projects may consume those.
+		/// </summary>
+		private string SharedItemReason(string item)
+		{
+			if (_project != null && _project.SecretRegistry != null)
+			{
+				foreach (SecretDeclaration other in _project.SecretRegistry)
+				{
+					if (other == null || string.Equals(other.LogicalKey, _logicalKey, StringComparison.Ordinal)) continue;
+					if (SecretProvisioner.TryGetItemName(_provider, other, out string otherItem) &&
+						string.Equals(otherItem, item, StringComparison.Ordinal))
+					{
+						return "the registry entry '" + other.LogicalKey + "' points at the same item";
+					}
+				}
+			}
+
+			// ItemNameFor with an empty type key yields exactly the project prefix ('<project-key>_') - reused
+			// so the kebab-folding rule keeps its one home.
+			string projectPrefix = SecretProvisioner.ItemNameFor(_project, string.Empty);
+			if (!item.StartsWith(projectPrefix, StringComparison.Ordinal))
+			{
+				return "its bare name (no '" + projectPrefix + "' prefix) marks it as team-level, not project-owned";
+			}
+
+			return null;
 		}
 
 		/// <summary>Who needs this key RIGHT NOW, recomputed from the project's definitions - the dialog holds no

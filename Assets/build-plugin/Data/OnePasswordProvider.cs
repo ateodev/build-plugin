@@ -137,6 +137,14 @@ namespace Ateo.Build
 			return ReferenceFor(item, field, kind);
 		}
 
+		public Task DeleteItemAsync(string item)
+		{
+			// Destructive - never let an empty title reach op ('op item delete ""' would just error late/cryptically).
+			if (string.IsNullOrEmpty(item)) throw new Exception("1Password DeleteItem got an empty item title.");
+
+			return _op.DeleteItemAsync(_vault, item, _account);
+		}
+
 		public SecretRef ReferenceFor(string item, string field, SecretKind kind = SecretKind.String)
 		{
 			// File secrets are DOCUMENTS addressed by item name alone (op://<vault>/<item>) - a document has no

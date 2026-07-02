@@ -59,5 +59,14 @@ namespace Ateo.Build
 		/// onboarding through it (§11.7). String fields are always stored as plain text (dev1 decision: values are
 		/// protected by vault access, not field masking); File values are stored as documents.</summary>
 		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value);
+
+		/// <summary>
+		/// Delete the WHOLE vault item named by its VERBATIM <paramref name="item"/> title - document items too
+		/// (a File secret's document IS an item). MANDATORY, like write: the self-service secret lifecycle
+		/// (create, rotate, repoint, unassign, delete) runs entirely through the provider verbs, and delete is its
+		/// destructive end - callers confirm with the user BEFORE calling and only drop their registry entry
+		/// AFTER this returns (throws on failure, so nothing is ever half-deleted).
+		/// </summary>
+		Task DeleteItemAsync(string item);
 	}
 }

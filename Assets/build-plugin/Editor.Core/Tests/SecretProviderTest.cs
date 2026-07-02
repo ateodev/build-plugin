@@ -11,8 +11,9 @@ namespace Ateo.Build.Tests
 	/// reference, returns the resolved value, that <c>ExistsAsync</c> splits the reference into vault/item/field, that
 	/// a File-kind reference routes to <c>ReadDocumentAsync</c> (not the string read), and the File/document round-trip:
 	/// CreateOrUpdateAsync(File) returns the field-less <c>op://&lt;vault&gt;/&lt;item&gt;</c> document reference, which
-	/// resolves as a document and whose presence is checked at ITEM level, and that <c>ListItemsAsync</c> filters
-	/// vault item titles by prefix without stripping them. Run from CI/CLI with:
+	/// resolves as a document and whose presence is checked at ITEM level, that <c>ListItemsAsync</c> filters
+	/// vault item titles by prefix without stripping them, and that <c>DeleteItemAsync</c> forwards the verbatim
+	/// item title to the CLI's item delete. Run from CI/CLI with:
 	///   Unity ... -batchmode -quit -executeMethod Ateo.Build.Tests.SecretProviderTest.RunSecretProviderTests
 	/// Exits 0 when every check passes, 1 otherwise. Mirrors PipelineSmokeTest's style (sample, not a shipped type).
 	/// </summary>
@@ -114,6 +115,19 @@ namespace Ateo.Build.Tests
 				LastReadAccount = account;
 				return Task.CompletedTask;
 			}
+
+			public string LastDeleteVault;
+			public string LastDeleteItem;
+			public bool DeleteCalled;
+
+			public Task DeleteItemAsync(string vault, string item, string account)
+			{
+				DeleteCalled = true;
+				LastDeleteVault = vault;
+				LastDeleteItem = item;
+				LastReadAccount = account;
+				return Task.CompletedTask;
+			}
 		}
 
 		#endregion
@@ -132,6 +146,7 @@ namespace Ateo.Build.Tests
 			failures += ResolveDocumentRef();
 			failures += ExistsChecksItemForDocumentRef();
 			failures += ListItemsFiltersByPrefix();
+			failures += DeleteForwardsItemTitle();
 
 			Debug.Log(failures == 0 ? "[SecretProviderTest] RESULT: ALL PASS" : "[SecretProviderTest] RESULT: FAILURES=" + failures);
 			if (Application.isBatchMode) EditorApplication.Exit(failures == 0 ? 0 : 1);
@@ -266,6 +281,24 @@ namespace Ateo.Build.Tests
 			failures += Check(items != null && items.Count == 2 && items[0] == "cred-team-github" && items[1] == "cred-uvcs-ci-bot",
 				"titles come back in full - the prefix is not stripped");
 			failures += Check(fake.LastListVault == OnePasswordProvider.DefaultVault, "listing targets the configured vault");
+			failures += Check(fake.LastReadAccount == OnePasswordProvider.DefaultAccount, "the account shorthand is passed through");
+
+			return failures;
+		}
+
+		/// <summary>DeleteItemAsync forwards the VERBATIM item title (and the configured vault) to the CLI - the
+		/// delete verb targets a title, never a reference, and nothing may rewrite it on the way down.</summary>
+		private static int DeleteForwardsItemTitle()
+		{
+			int failures = 0;
+			FakeOpCli fake = new FakeOpCli();
+			OnePasswordProvider provider = new OnePasswordProvider(fake);
+
+			provider.DeleteItemAsync("build-plugin-test_steam-user").GetAwaiter().GetResult();
+
+			failures += Check(fake.DeleteCalled, "delete routed to the CLI's item delete");
+			failures += Check(fake.LastDeleteItem == "build-plugin-test_steam-user", "the item title is forwarded verbatim");
+			failures += Check(fake.LastDeleteVault == OnePasswordProvider.DefaultVault, "delete targets the configured vault");
 			failures += Check(fake.LastReadAccount == OnePasswordProvider.DefaultAccount, "the account shorthand is passed through");
 
 			return failures;

@@ -12,9 +12,10 @@ namespace Ateo.Build
 	/// The Secrets registry pane (§12.6 / §11.2), demand-driven: rows are the UNION of the committed registry
 	/// entries and the keys the project's definitions actually need (<see cref="SecretDemand"/>), so a key an
 	/// action declares but nobody registered shows up here (greyed) instead of failing the next build. One
-	/// STATUS column is also the action: "OK" (+ an Edit affordance opening the three-verb manage dialog),
-	/// "Fix value" when the reference does not resolve in the vault, "Register" for needed-but-unregistered
-	/// keys, and "OK - unused" (+ Remove) for orphan entries. Registered, needed rows additionally carry a right-click
+	/// STATUS column is also the action: "OK" (+ an Edit affordance opening the manage dialog with its
+	/// Reassign/Unassign/Delete verb row), "Fix value" when the reference does not resolve in the vault,
+	/// "Register" for needed-but-unregistered
+	/// keys, and "OK - unused" (+ Unassign) for orphan entries. Registered, needed rows additionally carry a right-click
 	/// context menu (Change reference / Copy reference) - repointing an entry has no column of its own.
 	/// Provider status is stated ONCE in the header; when the
 	/// provider is unavailable every status renders "unknown" and all write buttons are disabled with the
@@ -132,7 +133,7 @@ namespace Ateo.Build
 				EditorGUILayout.LabelField("Status", EditorStyles.boldLabel, GUILayout.Width(130));
 				EditorGUILayout.LabelField("Action", EditorStyles.boldLabel, GUILayout.Width(110));
 				EditorGUILayout.LabelField("Needed by", EditorStyles.boldLabel);
-				GUILayout.Space(64); // the Remove column
+				GUILayout.Space(74); // the Unassign column
 			}
 		}
 
@@ -159,7 +160,7 @@ namespace Ateo.Build
 						: "";
 				EditorGUILayout.LabelField(new GUIContent(neededBy, neededBy), EditorStyles.miniLabel);
 
-				DrawRemoveButton(row);
+				DrawUnassignButton(row);
 				HandleRowContextMenu(rowScope.rect, row, providerAvailable);
 			}
 		}
@@ -170,7 +171,7 @@ namespace Ateo.Build
 		/// for muscle memory) and "Copy reference" (the reference is a POINTER, never the secret value - safe
 		/// on the clipboard, and it has no home in any dialog). Attached as a plain ContextClick check over the
 		/// row scope's rect - no extra controls, no layout cost. Unregistered and unused rows get NO menu:
-		/// their verbs (Register / Remove) already exist, and neither has a reference worth copying or
+		/// their verbs (Register / Unassign) already exist, and neither has a reference worth copying or
 		/// repointing. A dangling (not resolving) row keeps the menu - its Fix value button opens the same
 		/// dialog, but Copy reference has no other home there.
 		/// </summary>
@@ -220,7 +221,7 @@ namespace Ateo.Build
 			else if (row.State == SecretDemand.State.RegisteredUnused)
 			{
 				text = present == true ? "OK - unused" : present == false ? "unused (not resolving)" : "unused (unknown)";
-				tooltip = "Registered but nothing in the project needs it. Remove deletes only the registry entry - the vault is untouched.";
+				tooltip = "Registered but nothing in the project needs it. Unassign removes only the registry entry - the vault is untouched.";
 			}
 			else if (present == true)
 			{
@@ -246,11 +247,11 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// The Action column - one button per row, verb matched to the status: Register (not registered),
-		/// Edit (OK/unknown - opens the three-verb manage dialog: change value / reassign / delete), Fix value
+		/// Edit (OK/unknown - opens the manage dialog: change value + reassign/unassign/delete), Fix value
 		/// (not resolving; the label signals action is REQUIRED, per dev1). Fix value opens the FULL register
 		/// dialog in overwrite mode, not the manage surface: a dangling reference may point at a DELETED item,
 		/// and an in-place value write can never fix that - the fix must lead with repointing (dev1 got locked
-		/// into a deleted item). Unused rows get no action here - theirs is the Remove column. All write
+		/// into a deleted item). Unused rows get no action here - theirs is the Unassign column. All write
 		/// buttons disable with the reason when the provider is down.
 		/// </summary>
 		private void DrawActionCell(SecretDemand.Row row, bool providerAvailable)
@@ -262,7 +263,7 @@ namespace Ateo.Build
 			{
 				if (row.State == SecretDemand.State.RegisteredUnused)
 				{
-					GUILayout.Space(width); // no action - Remove (trailing column) is this row's verb
+					GUILayout.Space(width); // no action - Unassign (trailing column) is this row's verb
 					return;
 				}
 
@@ -292,7 +293,7 @@ namespace Ateo.Build
 					else
 					{
 						if (GUILayout.Button(new GUIContent("Edit",
-							disabledReason ?? "Manage this secret - change its value, reassign it, or delete the assignment."),
+							disabledReason ?? "Manage this secret - change its value, reassign or unassign it, or delete it from the vault."),
 							GUILayout.Width(width)))
 						{
 							OpenManageDialog(row);
@@ -303,41 +304,38 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// Remove on every REGISTERED row - including NEEDED keys (dev1: the old hard demand-guard was
-		/// redundant - removal makes the row visibly fall back to needed-unregistered, so the confirm states
-		/// the consequences instead of a block). The tooltip stays informative (who needs it); removal only
-		/// ever deletes the registry ENTRY - the vault item is untouched.
+		/// The trailing Unassign button - ONLY on 'OK - unused' rows (dev1: an orphan entry's one sensible verb,
+		/// right where the orphan is flagged). NEEDED-registered rows show NO trailing button: their Unassign
+		/// lives in the Edit popup's verb row, next to Reassign and Delete - one management surface instead of a
+		/// competing row shortcut. Every other row reserves the same width so the columns never jump. Unassign
+		/// only ever removes the registry ENTRY - the vault item is untouched.
 		/// </summary>
-		private void DrawRemoveButton(SecretDemand.Row row)
+		private void DrawUnassignButton(SecretDemand.Row row)
 		{
-			if (row.Declaration == null)
+			if (row.Declaration == null || row.State != SecretDemand.State.RegisteredUnused)
 			{
-				GUILayout.Space(64);
+				GUILayout.Space(74);
 				return;
 			}
 
-			bool needed = row.State != SecretDemand.State.RegisteredUnused;
-			string tooltip = needed
-				? "Remove this registry entry (the secret in the vault is untouched). Still needed by " +
-					string.Join("; ", row.Consumers) + " - the row falls back to 'not registered' until re-registered."
-				: "Remove this registry entry (the secret in the vault is untouched).";
-
-			if (GUILayout.Button(new GUIContent("Remove", tooltip), GUILayout.Width(60))) ConfirmRemove(row);
+			if (GUILayout.Button(new GUIContent("Unassign",
+				"Remove this orphan registry entry - the secret in the vault is untouched."), GUILayout.Width(70)))
+			{
+				ConfirmUnassign(row);
+			}
 		}
 
 		/// <summary>
-		/// One confirm for both row flavors, message built by the shared
-		/// <see cref="SecretDemand.RemoveConfirmMessage"/> (identical wording to the manage dialog's Delete
-		/// verb): a NEEDED key gets the consequences-stating form under the 'Delete secret assignment?' title,
-		/// an unused one keeps the simpler entry-only form.
+		/// The unused-row unassign confirm, message built by the shared
+		/// <see cref="SecretDemand.UnassignConfirmMessage"/> (identical wording to the manage dialog's Unassign
+		/// verb). Only orphan entries reach here (see <see cref="DrawUnassignButton"/>), so it is always the
+		/// simple entry-only form - no consumers, no consequences block.
 		/// </summary>
-		private void ConfirmRemove(SecretDemand.Row row)
+		private void ConfirmUnassign(SecretDemand.Row row)
 		{
-			bool needed = row.State != SecretDemand.State.RegisteredUnused;
-			bool confirmed = EditorUtility.DisplayDialog(
-				needed ? "Delete secret assignment?" : "Remove registry entry",
-				SecretDemand.RemoveConfirmMessage(row.Key, needed ? row.Consumers : null),
-				needed ? "Delete" : "Remove", "Cancel");
+			bool confirmed = EditorUtility.DisplayDialog("Unassign secret?",
+				SecretDemand.UnassignConfirmMessage(row.Key, null),
+				"Unassign", "Cancel");
 			if (!confirmed) return;
 
 			SecretProvisioner.RemoveSecret(_project, row.Key);
