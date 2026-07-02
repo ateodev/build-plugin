@@ -10,9 +10,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c583442a11a50e348949d70281ac9f0c, type: 3}
-  m_Name: Test Windows
+  m_Name: Test
   m_EditorClassIdentifier: 
-  _definitionName: Test Windows
+  _definitionName: Test
   _platform: 2
   _androidOutput: 0
   _buildProfile: {fileID: 11400000, guid: 4d9e818694398b84fa5be357442e6df8, type: 2}
