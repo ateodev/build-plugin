@@ -158,6 +158,26 @@ namespace Ateo.Build
 			return missing;
 		}
 
+		/// <summary>
+		/// The ONE removal-confirm text, shared by the Secrets view's Remove button and the manage dialog's
+		/// Delete verb (dev1: identical wording, stated once - never duplicated per call site). Always states
+		/// the entry-only rule (the vault item is untouched); when <paramref name="consumers"/> is non-empty the
+		/// key is still NEEDED, so the consequences are spelled out too - who needs it, the row falling back to
+		/// 'not registered', builds failing until re-registered. Empty consumers = the simple orphan-entry form.
+		/// </summary>
+		public static string RemoveConfirmMessage(string logicalKey, IReadOnlyList<string> consumers)
+		{
+			string message = "Remove '" + logicalKey + "' from the project's secret registry?\n\n" +
+				"Only the registry entry is removed - the secret in the vault is untouched.";
+
+			if (consumers == null || consumers.Count == 0) return message;
+
+			return message + "\n\n" +
+				"'" + logicalKey + "' is still needed by: " + string.Join("; ", consumers) + ".\n" +
+				"The row falls back to 'not registered' and builds that need this key will FAIL until it is " +
+				"registered again.";
+		}
+
 		/// <summary>Every <see cref="BuildDefinition"/> asset in the project - the demand universe for project-wide
 		/// reconciliation (mirrors the Build Panel's own asset scan).</summary>
 		public static List<BuildDefinition> CollectDefinitions()

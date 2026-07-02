@@ -9,8 +9,10 @@ namespace Ateo.Build
 	/// <summary>
 	/// The one reusable secrets dialog (Secrets UX spec #3/#4): REGISTER a logical key (create a new vault item
 	/// by convention and write its value now, or point the registry at an existing vault item - no free-text
-	/// reference mode), SET VALUE (write a new value to an already-registered reference; key + reference
-	/// fixed), and CHANGE REFERENCE (the register UI over an EXISTING entry, key fixed - completing it
+	/// reference mode), MANAGE an assigned key (dev1: the one-stop surface behind the Secrets view's Edit
+	/// button - three verbs: CHANGE VALUE writes a new value to the existing reference, REASSIGN morphs
+	/// this same window into change-reference mode, DELETE removes the registry entry after a consequences
+	/// confirm), and CHANGE REFERENCE (the register UI over an EXISTING entry, key fixed - completing it
 	/// OVERWRITES the entry's reference, the escape hatch when the current one dangles or should point
 	/// elsewhere). Strictly WRITE-ONLY: values are entered masked and never read back or displayed. Opened from the
 	/// Secrets view, the definition banner and the secret-key dropdown drawer; all writes go through the shared
@@ -69,14 +71,20 @@ namespace Ateo.Build
 			window.ShowUtility();
 		}
 
-		/// <summary>Open in SET VALUE mode: write a new value to <paramref name="declaration"/>'s EXISTING
-		/// reference (rotation / fixing a non-resolving entry). No naming, no mode choice, no registry change.</summary>
+		/// <summary>
+		/// Open in MANAGE mode (the Secrets view's Edit button on a healthy row): the one-stop surface for an
+		/// ASSIGNED key. Primary verb is CHANGE VALUE (write a new value to <paramref name="declaration"/>'s
+		/// EXISTING reference - rotation; no naming, no registry change); REASSIGN morphs this window into
+		/// change-reference mode (see <see cref="OpenForChangeReference"/>); DELETE removes the registry entry
+		/// (vault untouched) behind a consequences confirm.
+		/// </summary>
 		public static void OpenForSetValue(ProjectConfig project, SecretDeclaration declaration, Action onDone)
 		{
 			SecretRegisterDialog window = CreateInstance<SecretRegisterDialog>();
-			window.titleContent = new GUIContent("Set Secret Value");
+			string logicalKey = declaration != null ? declaration.LogicalKey : "";
+			window.titleContent = new GUIContent("Manage secret - " + logicalKey);
 			window._project = project;
-			window._logicalKey = declaration != null ? declaration.LogicalKey : "";
+			window._logicalKey = logicalKey;
 			window._kind = declaration != null ? declaration.Kind : SecretKind.String;
 			window._description = declaration != null ? declaration.Description : "";
 			window._usedBy = Array.Empty<string>();
@@ -129,7 +137,8 @@ namespace Ateo.Build
 
 		private void Initialize(bool setValueOnly, SecretDeclaration declaration)
 		{
-			minSize = new Vector2(460, setValueOnly ? 220 : 320);
+			// Manage mode carries the extra verb row (Change value / Reassign / Delete) below the value input.
+			minSize = new Vector2(460, setValueOnly ? 240 : 320);
 			_setValueOnly = setValueOnly;
 			_declaration = declaration;
 
@@ -187,10 +196,18 @@ namespace Ateo.Build
 					: _provider.UnavailableHint, MessageType.Error);
 			}
 
-			using (new EditorGUI.DisabledScope(!_providerUsable))
+			// Manage mode scopes provider-availability itself: DELETE is a registry-only edit and must stay
+			// usable with the provider signed out (the view's Remove button works without one too).
+			if (_setValueOnly)
 			{
-				if (_setValueOnly) DrawSetValue();
-				else DrawRegister();
+				DrawManage();
+			}
+			else
+			{
+				using (new EditorGUI.DisabledScope(!_providerUsable))
+				{
+					DrawRegister();
+				}
 			}
 
 			if (!string.IsNullOrEmpty(_error))
@@ -328,28 +345,73 @@ namespace Ateo.Build
 			}
 		}
 
-		// --- Set-value mode ---------------------------------------------------------------------------------
+		// --- Manage mode (assigned key: change value / reassign / delete) -----------------------------------
 
-		private void DrawSetValue()
+		private void DrawManage()
 		{
 			string reference = _declaration != null ? _declaration.Reference : "";
 			EditorGUILayout.LabelField(new GUIContent("Reference"), new GUIContent(reference, reference), EditorStyles.miniLabel);
 
 			if (!_writeCoordsOk)
 			{
+				// No early return: an unrecoverable write target only kills CHANGE VALUE - Reassign is the
+				// remedy and Delete never needs coordinates, so the verb row below must still render.
 				EditorGUILayout.HelpBox("This reference does not follow the provider's own convention (or points at " +
-					"different provider coordinates), so its write target cannot be recovered safely. Edit the value " +
-					"in the vault directly, or re-register the key.", MessageType.Warning);
-				return;
+					"different provider coordinates), so its write target cannot be recovered safely - the value " +
+					"cannot be changed here. Use Reassign to repoint the entry (or edit the value in the vault " +
+					"directly).", MessageType.Warning);
+			}
+			else
+			{
+				GUILayout.Space(4);
+				using (new EditorGUI.DisabledScope(!_providerUsable))
+				{
+					DrawValueInput();
+				}
 			}
 
-			GUILayout.Space(4);
-			DrawValueInput();
-
 			GUILayout.Space(8);
-			using (new EditorGUI.DisabledScope(!HasValueInput()))
+			DrawManageVerbs();
+		}
+
+		/// <summary>
+		/// The manage verb row (dev1 layout): the primary write button first, then - visually separated - the
+		/// entry-level verbs, Delete last. Each verb gates on exactly what it needs: Change value on a usable
+		/// provider AND recoverable write coordinates, Reassign on the provider only (it opens the register
+		/// write UI), Delete on nothing (a registry-only edit that must survive a signed-out provider).
+		/// </summary>
+		private void DrawManageVerbs()
+		{
+			using (new EditorGUILayout.HorizontalScope())
 			{
-				if (GUILayout.Button("Write value", GUILayout.Height(26))) WriteExistingValue();
+				using (new EditorGUI.DisabledScope(!_providerUsable || !_writeCoordsOk || !HasValueInput()))
+				{
+					if (GUILayout.Button(new GUIContent("Change value",
+						"Write the entered value to the existing reference (rotation). The current value is never shown."),
+						GUILayout.Height(26)))
+					{
+						WriteExistingValue();
+					}
+				}
+
+				GUILayout.FlexibleSpace();
+
+				using (new EditorGUI.DisabledScope(!_providerUsable))
+				{
+					if (GUILayout.Button(new GUIContent("Reassign",
+						"Point '" + _logicalKey + "' at a different vault item (or write a fresh one by convention) - " +
+						"switches this window to the change-reference UI."), GUILayout.Height(26)))
+					{
+						MorphToChangeReference();
+					}
+				}
+
+				if (GUILayout.Button(new GUIContent("Delete",
+					"Delete the registry entry for '" + _logicalKey + "' - the secret in the vault is untouched."),
+					GUILayout.Height(26)))
+				{
+					DeleteAssignment();
+				}
 			}
 		}
 
@@ -445,6 +507,59 @@ namespace Ateo.Build
 			{
 				_error = "Could not write the value: " + exception.Message;
 			}
+		}
+
+		/// <summary>
+		/// The REASSIGN verb: MORPH this window into the change-reference UI - the exact surface
+		/// <see cref="OpenForChangeReference"/> opens, over the same entry - instead of spawning a second
+		/// window (dev1). Mode flags flip, the title now says what the window is, the typed-but-unwritten
+		/// value is dropped, and the provider is re-resolved: manage mode may have picked the declaration's
+		/// scheme provider, but register writes go to the TEAM provider.
+		/// </summary>
+		private void MorphToChangeReference()
+		{
+			_setValueOnly = false;
+			_changeReference = true;
+			// Same consumer labels OpenForChangeReference receives from the view - merged into UsedBy on register.
+			_usedBy = CurrentConsumers().ToArray();
+			_stringValue = "";
+			_filePath = "";
+			_error = "";
+			titleContent = new GUIContent("Change reference - " + _logicalKey);
+			minSize = new Vector2(460, 320);
+			ResolveProvider();
+			Repaint();
+		}
+
+		/// <summary>
+		/// The DELETE verb: removes the REGISTRY ENTRY only - the vault item behind the reference is
+		/// deliberately untouched (<see cref="SecretProvisioner.RemoveSecret"/>) - behind a consequences
+		/// confirm. Consumers are computed FRESH from the project's definitions (not a stale row snapshot),
+		/// so the confirm names exactly who still needs the key right now. On confirm: remove (saves the
+		/// asset), notify the opener (the Secrets view refreshes via onDone) and close.
+		/// </summary>
+		private void DeleteAssignment()
+		{
+			bool confirmed = EditorUtility.DisplayDialog("Delete secret assignment?",
+				SecretDemand.RemoveConfirmMessage(_logicalKey, CurrentConsumers()),
+				"Delete", "Cancel");
+			if (!confirmed) return;
+
+			SecretProvisioner.RemoveSecret(_project, _logicalKey);
+			_onDone?.Invoke();
+			Close();
+		}
+
+		/// <summary>Who needs this key RIGHT NOW, recomputed from the project's definitions - the dialog holds no
+		/// row snapshot, and demand can change while it is open.</summary>
+		private List<string> CurrentConsumers()
+		{
+			Dictionary<string, SecretDemand.NeededSecret> needed =
+				SecretDemand.ComputeNeeded(SecretDemand.CollectDefinitions());
+
+			return needed.TryGetValue(_logicalKey, out SecretDemand.NeededSecret demand)
+				? demand.Consumers
+				: new List<string>();
 		}
 
 		private void Finish()

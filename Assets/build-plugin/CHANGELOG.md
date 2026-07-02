@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.17.1] - 2026-07-03
+### Changed
+- **One management popup per assigned secret** (dev1): the healthy-row Action button is renamed `Change value` -> `Edit` and opens a three-verb manage dialog (`Manage secret - <KEY>`) - **Change value** (the existing masked, write-only rotation; stays the primary view), **Reassign** (morphs the SAME window into the change-reference UI - create-new / use-existing, key fixed, entry overwritten in place; title flips to `Change reference - <KEY>`), and **Delete** (removes the REGISTRY ENTRY only, the vault item is untouched - behind a `Delete secret assignment?` confirm that, for a still-needed key, names who needs it and states the row falls back to `not registered` and builds will fail until re-registered). Delete works even with the provider signed out; an unrecoverable write target no longer dead-ends the dialog (Reassign is the remedy). The dangling-row `Fix value` button is unchanged.
+- **Needed-key removal is confirm-guarded instead of blocked**: the Secrets view's Remove button on a needed row is enabled now - the same consequences-stating confirm replaces the hard demand-guard (removal visibly drops the row to `not registered`, so the block bought nothing); the tooltip still names who needs the key. Unused rows keep the simpler entry-only confirm. One shared confirm-message builder (`SecretDemand.RemoveConfirmMessage`) serves both the view and the dialog.
+
 ## [0.17.0] - 2026-07-03
 ### Changed
 - **All string fields are written as plain text - the `concealed` flag is gone** (dev1 decision): `OpCli.CreateOrEditItemAsync` / `ISecretProvider.CreateOrUpdateAsync` no longer take a `concealed` parameter; every String write lands as a `text` field, never a masked `password` field (File values remain documents). Values are protected by VAULT ACCESS, not field masking - masking bought nothing while breaking field-type consistency across items and confusing the field picker. Contract change mirrored in `provider-contract.md` (Write verb).

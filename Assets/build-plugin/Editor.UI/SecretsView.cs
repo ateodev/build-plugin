@@ -12,9 +12,9 @@ namespace Ateo.Build
 	/// The Secrets registry pane (§12.6 / §11.2), demand-driven: rows are the UNION of the committed registry
 	/// entries and the keys the project's definitions actually need (<see cref="SecretDemand"/>), so a key an
 	/// action declares but nobody registered shows up here (greyed) instead of failing the next build. One
-	/// STATUS column is also the action: "OK" (+ a Change value rotation affordance), "Fix value" when the
-	/// reference does not resolve in the vault, "Register" for needed-but-unregistered keys, and
-	/// "OK - unused" (+ Remove) for orphan entries. Registered, needed rows additionally carry a right-click
+	/// STATUS column is also the action: "OK" (+ an Edit affordance opening the three-verb manage dialog),
+	/// "Fix value" when the reference does not resolve in the vault, "Register" for needed-but-unregistered
+	/// keys, and "OK - unused" (+ Remove) for orphan entries. Registered, needed rows additionally carry a right-click
 	/// context menu (Change reference / Copy reference) - repointing an entry has no column of its own.
 	/// Provider status is stated ONCE in the header; when the
 	/// provider is unavailable every status renders "unknown" and all write buttons are disabled with the
@@ -166,13 +166,13 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// Right-click verbs for REGISTERED, needed rows: "Change reference" (repoint/rewrite via the full
-		/// register dialog in overwrite mode - the OK/unknown Action column only rotates the value, so repointing
-		/// needs a home that costs no column) and "Copy reference" (the reference is a POINTER, never the secret
-		/// value - safe on the clipboard). Attached as a plain ContextClick check over the row scope's rect - no
-		/// extra controls, no layout cost. Unregistered and unused rows get NO menu: their verbs (Register /
-		/// Remove) already exist, and neither has a reference worth copying or repointing. A dangling (not
-		/// resolving) row keeps the menu - its Fix value button opens the same dialog, but Copy reference has
-		/// no other home there.
+		/// register dialog in overwrite mode - a one-click shortcut past the Edit dialog's Reassign verb, kept
+		/// for muscle memory) and "Copy reference" (the reference is a POINTER, never the secret value - safe
+		/// on the clipboard, and it has no home in any dialog). Attached as a plain ContextClick check over the
+		/// row scope's rect - no extra controls, no layout cost. Unregistered and unused rows get NO menu:
+		/// their verbs (Register / Remove) already exist, and neither has a reference worth copying or
+		/// repointing. A dangling (not resolving) row keeps the menu - its Fix value button opens the same
+		/// dialog, but Copy reference has no other home there.
 		/// </summary>
 		private void HandleRowContextMenu(Rect rowRect, SecretDemand.Row row, bool providerAvailable)
 		{
@@ -246,11 +246,12 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// The Action column - one button per row, verb matched to the status: Register (not registered),
-		/// Change value (OK/unknown - rotation), Fix value (not resolving; the label signals action is
-		/// REQUIRED, per dev1). Fix value opens the FULL register dialog in overwrite mode, not set-value:
-		/// a dangling reference may point at a DELETED item, and set-value can only rewrite in place - the fix
-		/// must also allow repointing (dev1 got locked into a deleted item). Unused rows get no action here -
-		/// theirs is the Remove column. All write buttons disable with the reason when the provider is down.
+		/// Edit (OK/unknown - opens the three-verb manage dialog: change value / reassign / delete), Fix value
+		/// (not resolving; the label signals action is REQUIRED, per dev1). Fix value opens the FULL register
+		/// dialog in overwrite mode, not the manage surface: a dangling reference may point at a DELETED item,
+		/// and an in-place value write can never fix that - the fix must lead with repointing (dev1 got locked
+		/// into a deleted item). Unused rows get no action here - theirs is the Remove column. All write
+		/// buttons disable with the reason when the provider is down.
 		/// </summary>
 		private void DrawActionCell(SecretDemand.Row row, bool providerAvailable)
 		{
@@ -290,10 +291,11 @@ namespace Ateo.Build
 					}
 					else
 					{
-						if (GUILayout.Button(new GUIContent("Change value",
-							disabledReason ?? "Write a NEW value (rotation). The current value is never shown."), GUILayout.Width(width)))
+						if (GUILayout.Button(new GUIContent("Edit",
+							disabledReason ?? "Manage this secret - change its value, reassign it, or delete the assignment."),
+							GUILayout.Width(width)))
 						{
-							OpenSetValueDialog(row);
+							OpenManageDialog(row);
 						}
 					}
 				}
@@ -301,8 +303,10 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// Remove on every REGISTERED row, demand-guarded: a needed key's entry cannot be removed (disabled with
-		/// who needs it), an unused one can. Removes only the registry ENTRY - the vault item is untouched.
+		/// Remove on every REGISTERED row - including NEEDED keys (dev1: the old hard demand-guard was
+		/// redundant - removal makes the row visibly fall back to needed-unregistered, so the confirm states
+		/// the consequences instead of a block). The tooltip stays informative (who needs it); removal only
+		/// ever deletes the registry ENTRY - the vault item is untouched.
 		/// </summary>
 		private void DrawRemoveButton(SecretDemand.Row row)
 		{
@@ -314,21 +318,26 @@ namespace Ateo.Build
 
 			bool needed = row.State != SecretDemand.State.RegisteredUnused;
 			string tooltip = needed
-				? "Required by " + string.Join("; ", row.Consumers) + " - remove the consumer first."
+				? "Remove this registry entry (the secret in the vault is untouched). Still needed by " +
+					string.Join("; ", row.Consumers) + " - the row falls back to 'not registered' until re-registered."
 				: "Remove this registry entry (the secret in the vault is untouched).";
 
-			using (new EditorGUI.DisabledScope(needed))
-			{
-				if (GUILayout.Button(new GUIContent("Remove", tooltip), GUILayout.Width(60))) ConfirmRemove(row);
-			}
+			if (GUILayout.Button(new GUIContent("Remove", tooltip), GUILayout.Width(60))) ConfirmRemove(row);
 		}
 
+		/// <summary>
+		/// One confirm for both row flavors, message built by the shared
+		/// <see cref="SecretDemand.RemoveConfirmMessage"/> (identical wording to the manage dialog's Delete
+		/// verb): a NEEDED key gets the consequences-stating form under the 'Delete secret assignment?' title,
+		/// an unused one keeps the simpler entry-only form.
+		/// </summary>
 		private void ConfirmRemove(SecretDemand.Row row)
 		{
-			bool confirmed = EditorUtility.DisplayDialog("Remove registry entry",
-				"Remove '" + row.Key + "' from the project's secret registry?\n\n" +
-				"Only the registry entry is removed - the secret in the vault is untouched.",
-				"Remove", "Cancel");
+			bool needed = row.State != SecretDemand.State.RegisteredUnused;
+			bool confirmed = EditorUtility.DisplayDialog(
+				needed ? "Delete secret assignment?" : "Remove registry entry",
+				SecretDemand.RemoveConfirmMessage(row.Key, needed ? row.Consumers : null),
+				needed ? "Delete" : "Remove", "Cancel");
 			if (!confirmed) return;
 
 			SecretProvisioner.RemoveSecret(_project, row.Key);
@@ -342,7 +351,7 @@ namespace Ateo.Build
 				keyEditable: false, onRegistered: null, onDone: () => Refresh(_owner));
 		}
 
-		private void OpenSetValueDialog(SecretDemand.Row row)
+		private void OpenManageDialog(SecretDemand.Row row)
 		{
 			SecretRegisterDialog.OpenForSetValue(_project, row.Declaration, onDone: () => Refresh(_owner));
 		}
