@@ -48,9 +48,20 @@ namespace Ateo.Build
 
 			SirenixEditorGUI.BeginBox("Secret registry");
 			{
-				if (GUILayout.Button("Re-check presence")) CheckPresence();
+				// Disabled while a check is in flight: CheckPresence() would silently no-op on its _checking guard.
+				using (new EditorGUI.DisabledScope(_checking))
+				{
+					if (GUILayout.Button("Re-check presence")) CheckPresence();
+				}
 
-				if (_project == null || _project.SecretRegistry == null || _project.SecretRegistry.Count == 0)
+				if (_project == null)
+				{
+					EditorGUILayout.LabelField("No ProjectConfig found - run the project-setup wizard first.", EditorStyles.miniLabel);
+					SirenixEditorGUI.EndBox();
+					return;
+				}
+
+				if (_project.SecretRegistry == null || _project.SecretRegistry.Count == 0)
 				{
 					EditorGUILayout.LabelField("No secrets registered on the project's ProjectConfig.", EditorStyles.miniLabel);
 					SirenixEditorGUI.EndBox();
@@ -119,9 +130,13 @@ namespace Ateo.Build
 		private async Task CheckPresenceAsync()
 		{
 			_serverPresence.Clear();
-			if (_project.SecretRegistry == null) return;
+			if (_project == null || _project.SecretRegistry == null) return;
 
-			foreach (SecretDeclaration declaration in _project.SecretRegistry)
+			// Snapshot the registry: it can be edited in the Inspector while probes are in flight, and enumerating
+			// the live list across awaits would throw "Collection was modified" into the panel status.
+			List<SecretDeclaration> snapshot = new List<SecretDeclaration>(_project.SecretRegistry);
+
+			foreach (SecretDeclaration declaration in snapshot)
 			{
 				if (declaration == null || string.IsNullOrEmpty(declaration.LogicalKey)) continue;
 
