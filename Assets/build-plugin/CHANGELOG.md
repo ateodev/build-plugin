@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0] - 2026-07-02
+### Added (build notifications - scheme-dispatched, Slack now, Discord-ready)
+- **`ProjectConfig` gains `Notification Target`** (replaces the Slack-specific channel field - hard rename, no migration shim): a scheme-tagged target like `slack:C0123ABC456`; empty = no notifications. Delivered server-side by the executor scripts (the plugin stays delivery-ignorant); the scheme picks the transport, so `discord:<provider-ref>` and future channels slot in agent-side with zero plugin changes.
+- **Per-definition override**: a `BuildDefinition` can set its own `Notification Target Override` (e.g. a nightly smoke posting to a quieter channel); empty inherits the project target.
+- **Per-build mute**: a "Mute notifications (this build)" toggle in the trigger section sends `unitybuild.notify=false` (recorded on the build; suppresses success AND failure messages).
+- Authoring-time validation (`NotificationTarget` helper in Data): untagged targets are invalid - the wizard and Configure tab flag them with the expected form; known schemes today: `slack`, `discord`.
+- Wizard: the Slack field became a scheme-neutral "Notifications" section.
+
 ## [0.8.2] - 2026-07-02
 ### Added
 - **Select an existing checkout credential** (13.3): the project-setup wizard now lists the team vault's existing `cred-*` items in a dropdown (names shown without the prefix) next to "add new" - reusing a credential skips key generation/paste/verify entirely. Backed by a new provider verb `ListItemsAsync(prefix)` on `ISecretProvider` (op impl via `op item list`; an empty result just hides the select-existing mode).

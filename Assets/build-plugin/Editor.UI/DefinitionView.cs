@@ -41,6 +41,10 @@ namespace Ateo.Build
 		private string _changeset = "";
 		private string _buildName = "";
 
+		// Session-only like the version/changeset overrides (deliberately NOT EditorPrefs-persisted): muting is a
+		// per-trigger decision, and a sticky mute would silently swallow notifications for weeks.
+		private bool _muteNotifications;
+
 		private List<BuildRow> _builds = new List<BuildRow>();
 		private bool _loading;
 		private string _localStatus = "";
@@ -246,6 +250,15 @@ namespace Ateo.Build
 
 				DrawActionToggles();
 
+				// Server-only (a local build never notifies), mirroring the changeset field's disable behavior.
+				using (new EditorGUI.DisabledScope(_target == TriggerTarget.Local))
+				{
+					_muteNotifications = EditorGUILayout.ToggleLeft(
+						new GUIContent("Mute notifications (this build)", "Send unitybuild.notify=false with this trigger " +
+							"so no notification is posted for it. Session-only - resets when the panel reloads."),
+						_muteNotifications);
+				}
+
 				GUILayout.Space(4);
 				using (new EditorGUILayout.HorizontalScope())
 				{
@@ -363,6 +376,19 @@ namespace Ateo.Build
 			}
 
 			AppendAction(action);
+		}
+
+		// The inline editor above draws _notificationTargetOverride like every other definition field; this adds
+		// the authoring-time validation a plain serialized field can't carry (Data stays editor/Odin-free).
+		[TabGroup("Tabs", "Configure"), OnInspectorGUI, PropertyOrder(2)]
+		private void DrawConfigureValidation()
+		{
+			string overrideTarget = _definition.NotificationTargetOverride;
+			if (!string.IsNullOrEmpty(overrideTarget) && !NotificationTarget.IsValid(overrideTarget))
+			{
+				EditorGUILayout.HelpBox("Notification Target Override is not a valid notification target - " +
+					NotificationTarget.ExpectedFormHint() + ".", MessageType.Error);
+			}
 		}
 
 		private void AppendAction(PostBuildAction action)
@@ -552,6 +578,17 @@ namespace Ateo.Build
 				return;
 			}
 
+			// Fail-early on an invalid effective target (override wins, else the Project Config's): otherwise the
+			// mis-tagged string only surfaces as a silently missing notification server-side (no-silent-fallback).
+			string notifyTarget = _definition.NotificationTargetOverride;
+			if (string.IsNullOrEmpty(notifyTarget) && _owner.Project != null) notifyTarget = _owner.Project.NotificationTarget;
+			if (!string.IsNullOrEmpty(notifyTarget) && !NotificationTarget.IsValid(notifyTarget))
+			{
+				_owner.SetStatus("Notification target '" + notifyTarget + "' is invalid - " +
+					NotificationTarget.ExpectedFormHint() + ". Fix it (or clear it) before triggering.");
+				return;
+			}
+
 			Dictionary<string, string> properties = new Dictionary<string, string>
 			{
 				{ "unitybuild.project", _owner.Project != null ? _owner.Project.ProjectKey : "" },
@@ -587,6 +624,9 @@ namespace Ateo.Build
 
 			string skip = SkipSet();
 			if (!string.IsNullOrEmpty(skip)) properties["unitybuild.actions.skip"] = skip;
+
+			// Only sent when muting - absent means the server's default (notify), so unmuted triggers stay unchanged.
+			if (_muteNotifications) properties["unitybuild.notify"] = "false";
 
 			using (TeamCityClient client = _owner.NewClient())
 			{

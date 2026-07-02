@@ -64,6 +64,10 @@ namespace Ateo.Build
 			"A bare branch name (e.g. \"main\", no origin/ prefix); empty = the repo's default branch.")]
 		private string _defaultBranch;
 
+		[SerializeField, Tooltip("Scheme-tagged notification target for THIS definition only, e.g. slack:C0123ABC456. " +
+			"Wins over the Project Config's Notification Target; empty = inherit it.")]
+		private string _notificationTargetOverride;
+
 		[SerializeField, Tooltip("Fully-qualified static method (e.g. \"AndroidBuilder.BuildFromCommandLine\") to call " +
 			"INSTEAD of the built-in build. Lets a game's existing headless builder plug in unchanged. Empty = built-in.")]
 		private string _buildMethod;
@@ -90,6 +94,9 @@ namespace Ateo.Build
 		public IReadOnlyList<BuildStep> PostSteps => _postSteps;
 		public IReadOnlyList<PostBuildAction> PostBuildActions => _postBuildActions;
 		public string DefaultBranch => _defaultBranch;
+
+		/// <summary>Per-definition notification target override; empty = inherit the Project Config's target.</summary>
+		public string NotificationTargetOverride => _notificationTargetOverride;
 		public string BuildMethod => _buildMethod;
 		public string BuildMethodArgs => _buildMethodArgs;
 		public bool UsesGameBuilder => !string.IsNullOrEmpty(_buildMethod);

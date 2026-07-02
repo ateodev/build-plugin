@@ -16,7 +16,7 @@ namespace Ateo.Build
 	/// offers when no <see cref="ProjectConfig"/> asset exists. Heavy on auto-detection (project key from the
 	/// product name, repo URL from <c>git remote</c>), it gathers the per-project onboarding facts - project key,
 	/// team (which supplies the secret-provider coords from its TeamCity params), server URL, VCS + a reusable
-	/// checkout credential (the credential registry §13.3), Slack channel, Unity license (§13.4) - then
+	/// checkout credential (the credential registry §13.3), notification target, Unity license (§13.4) - then
 	/// <c>Create ProjectConfig</c> provisions the pending credential secrets, writes the <c>vcs-&lt;key&gt;</c>
 	/// record and creates <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing lives in the
 	/// Settings view.
@@ -126,9 +126,14 @@ namespace Ateo.Build
 		[SerializeField, LabelText("Server URL"), Tooltip("TeamCity base URL the panel talks to. Re-fetches the team list when changed.")]
 		private string _serverBaseUrl = "https://build.ateonet.work";
 
-		[BoxGroup("Project"), PropertyOrder(3)]
-		[SerializeField, Tooltip("Slack channel id this project's build notifications post to.")]
-		private string _slackChannelId = "";
+		// --- Notifications ------------------------------------------------------------------------------------
+
+		[BoxGroup("Notifications"), PropertyOrder(5)]
+		[InfoBox("$" + nameof(NotificationTargetError), InfoMessageType.Error, nameof(IsNotificationTargetInvalid))]
+		[SerializeField, LabelText("Target"), Tooltip("Scheme-tagged target this project's build notifications go to, " +
+			"e.g. slack:C0123ABC456 (a Slack channel id, delivered via the team's TeamCity Slack connection). " +
+			"Empty = no notifications.")]
+		private string _notificationTarget = "";
 
 		// --- Secrets provider ---------------------------------------------------------------------------------
 
@@ -242,6 +247,10 @@ namespace Ateo.Build
 		private bool ShowUvcs => IsAddNew && _credentialType == CredentialType.UvcsPat;
 		private bool ShowUvcsGenerate => ShowUvcs && _patMode == PatMode.GenerateNow;
 		private bool ShowUvcsPaste => ShowUvcs && _patMode == PatMode.Paste;
+
+		// Empty is fine (= no notifications); only a non-empty, un-tagged/unknown-scheme value is an authoring error.
+		private bool IsNotificationTargetInvalid => !string.IsNullOrEmpty(_notificationTarget) && !NotificationTarget.IsValid(_notificationTarget);
+		private string NotificationTargetError => "Not a valid notification target - " + NotificationTarget.ExpectedFormHint() + ".";
 
 		#endregion
 
@@ -401,6 +410,13 @@ namespace Ateo.Build
 			}
 
 			_projectKey = ToProjectKey(_projectKey); // enforce the lowercase [a-z0-9-] format on hand-typed input
+
+			// Fail-early on an un-tagged/unknown-scheme target: nothing downstream guesses a scheme (no bare fallback).
+			if (IsNotificationTargetInvalid)
+			{
+				_validation = "Target (Notifications) is not a valid notification target - " + NotificationTarget.ExpectedFormHint() + ".";
+				return;
+			}
 
 			EnsureBuildConfigsFolder();
 			const string assetPath = "Assets/BuildConfigs/ProjectConfig.asset";
@@ -624,7 +640,7 @@ namespace Ateo.Build
 			SetField(project, "_projectKey", _projectKey);
 			SetField(project, "_teamId", _teamId);
 			SetField(project, "_serverBaseUrl", _serverBaseUrl);
-			SetField(project, "_slackChannelId", _slackChannelId);
+			SetField(project, "_notificationTarget", _notificationTarget);
 			SetField(project, "_vcs", _vcs);
 			SetField(project, "_unityVersion", _unityVersion);
 			SetField(project, "_unityLicenseName", _unityLicenseName);

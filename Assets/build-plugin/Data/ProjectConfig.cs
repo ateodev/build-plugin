@@ -38,8 +38,9 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Pinned Unity version. Empty = read from ProjectSettings/ProjectVersion.txt.")]
 		private string _unityVersion;
 
-		[SerializeField, Tooltip("Slack channel id this project's build notifications post to.")]
-		private string _slackChannelId;
+		[SerializeField, Tooltip("Scheme-tagged target this project's build notifications go to, e.g. slack:C0123ABC456 " +
+			"(a Slack channel id, delivered via the team's TeamCity Slack connection). Empty = no notifications.")]
+		private string _notificationTarget;
 
 		[SerializeField, Tooltip("Name of the Unity license to build with (matched agent-side to <name>.ulf). Default \"ateo\".")]
 		private string _unityLicenseName = "ateo";
@@ -57,7 +58,7 @@ namespace Ateo.Build
 		public string TeamId => _teamId;
 		public string ServerBaseUrl => _serverBaseUrl;
 		public string UnityVersion => _unityVersion;
-		public string SlackChannelId => _slackChannelId;
+		public string NotificationTarget => _notificationTarget;
 		public string UnityLicenseName => _unityLicenseName;
 
 		/// <summary>The committed values-free secret registry (logical key -> scheme-tagged reference; never values).</summary>

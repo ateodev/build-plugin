@@ -9,7 +9,7 @@ namespace Ateo.Build
 	/// <summary>
 	/// The project-level Settings pane (§12.6), reached from the top menu bar. Edits the per-user connection
 	/// (the access token, stored in <see cref="BuildServerSettings"/>) and, inline, the committed
-	/// <see cref="ProjectConfig"/> (server URL, team, Slack channel, secret registry).
+	/// <see cref="ProjectConfig"/> (server URL, team, notification target, secret registry).
 	/// </summary>
 	internal sealed class SettingsView : IPanelView
 	{
