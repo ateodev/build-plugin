@@ -70,6 +70,10 @@ namespace Ateo.Build
 			"Wins over the Project Config's Notification Target; empty = inherit it.")]
 		private string _notificationTargetOverride;
 
+		[SerializeField, Tooltip("Suppress build notifications for this definition's builds - success and failure. " +
+			"Committed asset data, so it also mutes manually-started server builds (which send no wire params).")]
+		private bool _muteNotifications;
+
 		[SerializeField, Tooltip("Fully-qualified static method (e.g. \"AndroidBuilder.BuildFromCommandLine\") to call " +
 			"INSTEAD of the built-in build. Lets a game's existing headless builder plug in unchanged. Empty = built-in.")]
 		private string _buildMethod;
@@ -99,6 +103,9 @@ namespace Ateo.Build
 
 		/// <summary>Per-definition notification target override; empty = inherit the Project Config's target.</summary>
 		public string NotificationTargetOverride => _notificationTargetOverride;
+
+		/// <summary>Suppress build notifications (success and failure) for this definition's builds.</summary>
+		public bool MuteNotifications => _muteNotifications;
 		public string BuildMethod => _buildMethod;
 		public string BuildMethodArgs => _buildMethodArgs;
 		public bool UsesGameBuilder => !string.IsNullOrEmpty(_buildMethod);

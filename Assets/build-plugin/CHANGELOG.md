@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.0] - 2026-07-02
+### Added
+- **Next-build folder preview** in the Build tab: a live read-only line showing exactly where the next build will land (e.g. `Builds/Linux/Test/1.0_4-my-cool-build/`), composed by the same code that names the real output folder - updates as you edit the build name or bump the build number.
+- **Mute Notifications is now a Build Definition setting** (committed data - it also mutes manual TeamCity runs, since the agent reads it from the asset). The per-trigger mute toggle is gone from the panel (real users never used it); `unitybuild.notify=false` remains as a CI-side wire override.
+
 ## [0.11.0] - 2026-07-02
 ### Changed (definition identity & naming - dev1-grilled redesign)
 - **A definition's machine identity is its asset GUID** (the .meta guid): the trigger sends `unitybuild.definitionId`; the agent and `BuildRunner -buildDefinitionId` resolve by guid; history/dedup filter by it. Renaming a definition file (or field) can no longer break anything.

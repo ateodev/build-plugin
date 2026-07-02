@@ -42,10 +42,6 @@ namespace Ateo.Build
 		private string _changeset = "";
 		private string _buildName = "";
 
-		// Session-only like the version/changeset overrides (deliberately NOT EditorPrefs-persisted): muting is a
-		// per-trigger decision, and a sticky mute would silently swallow notifications for weeks.
-		private bool _muteNotifications;
-
 		private List<BuildRow> _builds = new List<BuildRow>();
 		private bool _loading;
 		private string _localStatus = "";
@@ -245,8 +241,27 @@ namespace Ateo.Build
 							"Empty = the definition's Default Branch (or, if that is empty too, the repo's default branch)."),
 						_changeset);
 				}
+
+				DrawNextBuildPreview();
 			}
 			SirenixEditorGUI.EndBox();
+		}
+
+		/// <summary>
+		/// Read-only preview of the §12.2 identity folder the NEXT build would produce, composed by the exact
+		/// same <see cref="BuildLayout"/> code the build output and downloads resolve through - what is shown is
+		/// what gets written. Recomputed every IMGUI pass, so it tracks build-name edits and Bump live. Version
+		/// is the COMMITTED PlayerSettings.bundleVersion: the Version-name override is a no-op wire param until
+		/// the BUILD_VERSION_NAME task lands (§15), so the committed value is what the next build really stamps.
+		/// </summary>
+		private void DrawNextBuildPreview()
+		{
+			string preview = BuildLayout.LocalRelativePath(
+				_definition, PlayerSettings.bundleVersion, CurrentBuildNumber(), _buildName);
+			EditorGUILayout.LabelField(
+				new GUIContent("Next build folder", "Where the next build of this definition lands, relative to the " +
+					"project root (server builds download into the same folder)."),
+				new GUIContent(preview, preview), EditorStyles.miniLabel);
 		}
 
 		private void DrawTrigger()
@@ -258,15 +273,6 @@ namespace Ateo.Build
 					_target);
 
 				DrawActionToggles();
-
-				// Server-only (a local build never notifies), mirroring the changeset field's disable behavior.
-				using (new EditorGUI.DisabledScope(_target == TriggerTarget.Local))
-				{
-					_muteNotifications = EditorGUILayout.ToggleLeft(
-						new GUIContent("Mute notifications (this build)", "Send unitybuild.notify=false with this trigger " +
-							"so no notification is posted for it. Session-only - resets when the panel reloads."),
-						_muteNotifications);
-				}
 
 				GUILayout.Space(4);
 				using (new EditorGUILayout.HorizontalScope())
@@ -657,8 +663,10 @@ namespace Ateo.Build
 			string skip = SkipSet();
 			if (!string.IsNullOrEmpty(skip)) properties["unitybuild.actions.skip"] = skip;
 
-			// Only sent when muting - absent means the server's default (notify), so unmuted triggers stay unchanged.
-			if (_muteNotifications) properties["unitybuild.notify"] = "false";
+			// Definition-level mute (the committed Mute Notifications field). Only sent when muting - absent means
+			// the server's default (notify), so unmuted triggers stay unchanged. The wire param stays CI-only:
+			// the agent also reads the committed field itself, which covers manual TC runs that send no params.
+			if (_definition.MuteNotifications) properties["unitybuild.notify"] = "false";
 
 			using (TeamCityClient client = _owner.NewClient())
 			{

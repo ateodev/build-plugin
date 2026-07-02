@@ -70,6 +70,19 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
+		/// The LOCAL layout path of one build's identity folder RELATIVE to the project root
+		/// (<c>Builds/&lt;token&gt;/&lt;name&gt;/&lt;identity&gt;/</c>, forward slashes, trailing slash) - e.g.
+		/// <c>Builds/Linux/Test/1.0_4-my-cool-build/</c>. Composed from the exact same
+		/// <see cref="DefinitionDirectory"/> + <see cref="FolderName"/> pieces the build output and downloads
+		/// resolve through, so a UI preview of "where the next build lands" can never drift from the real path.
+		/// </summary>
+		public static string LocalRelativePath(BuildDefinition definition, string version, int buildNumber, string buildName = null)
+		{
+			string path = Path.Combine(DefinitionDirectory("", definition), FolderName(definition, version, buildNumber, buildName));
+			return path.Replace('\\', '/') + "/";
+		}
+
+		/// <summary>
 		/// LOCAL layout: the <c>Builds/&lt;token&gt;/&lt;name&gt;/</c> directory (under the Unity project root)
 		/// that holds all of a definition's build folders. A project root names no platform, so the token
 		/// segment states it here - and keeps same-named definitions on different platforms apart.
