@@ -8,8 +8,8 @@ namespace Ateo.Build
 {
 	/// <summary>
 	/// The project-level Settings pane (§12.6), reached from the top menu bar. Edits the per-user connection
-	/// (the access token, stored in <see cref="BuildServerSettings"/>) and, inline, the committed
-	/// <see cref="ProjectConfig"/> (server URL, team, notification target, secret registry).
+	/// (the server URL + access token, stored in <see cref="BuildServerSettings"/>) and, inline, the committed
+	/// <see cref="ProjectConfig"/> (team, notification target, secret registry).
 	/// </summary>
 	internal sealed class SettingsView : IPanelView
 	{
@@ -44,6 +44,17 @@ namespace Ateo.Build
 
 			SirenixEditorGUI.BeginBox("Connection (this machine only)");
 			{
+				// Delayed (commit on Enter/focus-loss), not per-keystroke: the setting falls back to the
+				// canonical default when empty, so a live field would snap back mid-edit the moment the
+				// user cleared it to type a new URL. The getter's default also serves as the display value,
+				// so a fresh machine shows the canonical server instead of an empty prompt.
+				EditorGUI.BeginChangeCheck();
+				string serverUrl = EditorGUILayout.DelayedTextField(
+					new GUIContent("Server URL", "TeamCity base URL the plugin talks to, e.g. https://build.ateonet.work " +
+						"or http://localhost:8111. A per-machine setting - stored on this machine only, never committed."),
+					BuildServerSettings.ServerBaseUrl);
+				if (EditorGUI.EndChangeCheck()) BuildServerSettings.ServerBaseUrl = serverUrl;
+
 				using (new EditorGUILayout.HorizontalScope())
 				{
 					// Only write the EditorPrefs-backed token on an actual edit, not on every repaint.

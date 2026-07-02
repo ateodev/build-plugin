@@ -29,7 +29,6 @@ namespace Ateo.Build
 
 		private BuildDefinition[] _definitions = Array.Empty<BuildDefinition>();
 		private ProjectConfig _project;
-		private string _baseUrl = "";
 		private Dictionary<string, string> _executors = new Dictionary<string, string>();
 
 		private object _paneOverride;
@@ -49,8 +48,10 @@ namespace Ateo.Build
 		/// <summary>The project's resolved <see cref="ProjectConfig"/> (null until found / created).</summary>
 		internal ProjectConfig Project => _project;
 
-		/// <summary>Base URL of the TeamCity server the panel talks to.</summary>
-		internal string BaseUrl => _baseUrl;
+		// Read live from the per-user setting (never cached): caching the URL was why "Build On Server"
+		// once hit an unreachable host after the configured URL changed (v0.7.3).
+		/// <summary>Base URL of the TeamCity server the panel talks to (per-machine, from <see cref="BuildServerSettings"/>).</summary>
+		internal string BaseUrl => BuildServerSettings.ServerBaseUrl;
 
 		/// <summary>The user's permission-scoped access token (machine-local).</summary>
 		internal string Token => BuildServerSettings.Token;
@@ -227,7 +228,7 @@ namespace Ateo.Build
 		/// <summary>A fresh REST client bound to the current server URL + token. Caller disposes.</summary>
 		internal TeamCityClient NewClient()
 		{
-			return new TeamCityClient(_baseUrl, Token);
+			return new TeamCityClient(BaseUrl, Token);
 		}
 
 		/// <summary>
@@ -238,12 +239,13 @@ namespace Ateo.Build
 		/// </summary>
 		internal string ResolveServerLink(string webUrl)
 		{
-			if (string.IsNullOrEmpty(webUrl) || string.IsNullOrEmpty(_baseUrl)) return webUrl;
+			string baseUrl = BaseUrl;
+			if (string.IsNullOrEmpty(webUrl) || string.IsNullOrEmpty(baseUrl)) return webUrl;
 
 			try
 			{
 				Uri link = new Uri(webUrl);
-				return _baseUrl.TrimEnd('/') + link.PathAndQuery + link.Fragment;
+				return baseUrl.TrimEnd('/') + link.PathAndQuery + link.Fragment;
 			}
 			catch (UriFormatException)
 			{
@@ -409,11 +411,6 @@ namespace Ateo.Build
 			_project = projectGuids.Length > 0
 				? AssetDatabase.LoadAssetAtPath<ProjectConfig>(AssetDatabase.GUIDToAssetPath(projectGuids[0]))
 				: null;
-
-			// Always track the loaded project's configured server URL - it can change (e.g. a fresh onboarding pointing
-			// at http://localhost:8111). Caching the first value was why "Build On Server" hit an unreachable host.
-			if (_project != null && !string.IsNullOrEmpty(_project.ServerBaseUrl)) _baseUrl = _project.ServerBaseUrl;
-			else if (string.IsNullOrEmpty(_baseUrl)) _baseUrl = "https://build.ateonet.work";
 
 			// Drop cached views whose asset was deleted, so the dictionary doesn't leak.
 			List<BuildDefinition> stale = new List<BuildDefinition>();

@@ -13,9 +13,12 @@ namespace Ateo.Build
 
 	/// <summary>
 	/// Project-wide build configuration: settings shared by every <see cref="BuildDefinition"/> in this
-	/// project. Committed under Assets/BuildConfigs/. Holds NON-SECRET, project-level facts only. The
-	/// authoritative repo URL + credentials live agent-side on the build server (fixed at onboarding, keyed
-	/// by the project key); the values here are for the plugin's local use, the panel, and human reference.
+	/// project. Committed under Assets/BuildConfigs/. Holds NON-SECRET, MACHINE-INDEPENDENT project facts
+	/// only - a committed value must be right on every machine that opens the project. Environment facts
+	/// (the TeamCity server URL, the access token) live per-user in <c>BuildServerSettings</c>
+	/// (EditorPrefs), never here. The authoritative repo URL + credentials live agent-side on the build
+	/// server (fixed at onboarding, keyed by the project key); the values here are for the plugin's local
+	/// use, the panel, and human reference.
 	/// </summary>
 	[CreateAssetMenu(menuName = "Build/Project Config", fileName = "BuildProjectConfig", order = 1)]
 	public sealed class ProjectConfig : ScriptableObject
@@ -31,9 +34,6 @@ namespace Ateo.Build
 
 		[SerializeField, Tooltip("Trust-boundary team this project belongs to (resolves which TeamCity subtree/executors).")]
 		private string _teamId;
-
-		[SerializeField, Tooltip("TeamCity base URL the in-editor panel talks to, e.g. https://build.ateonet.work")]
-		private string _serverBaseUrl = "https://build.ateonet.work";
 
 		[SerializeField, Tooltip("Pinned Unity version. Empty = read from ProjectSettings/ProjectVersion.txt.")]
 		private string _unityVersion;
@@ -56,7 +56,6 @@ namespace Ateo.Build
 		public string ProjectKey => _projectKey;
 		public VcsKind Vcs => _vcs;
 		public string TeamId => _teamId;
-		public string ServerBaseUrl => _serverBaseUrl;
 		public string UnityVersion => _unityVersion;
 		public string NotificationTarget => _notificationTarget;
 		public string UnityLicenseName => _unityLicenseName;

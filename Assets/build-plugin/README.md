@@ -50,9 +50,11 @@ Add via UPM git URL (Package Manager > `+` > *Install package from git URL...*),
   platform (Android, iOS, Windows, ... -- 18 authorable types incl. dedicated servers and
   consoles). Wraps a Unity 6 Build Profile (preferred) and adds output naming, a default branch,
   per-definition Unity version override, and the post-build pipeline.
-- **ProjectConfig** -- the one per-project asset: project key, team, server URL, VCS kind, Unity
-  version/license, Slack channel, and the secret registry. The project key is the join key: the
-  server resolves repo, credentials, secrets and license from it alone.
+- **ProjectConfig** -- the one per-project asset: project key, team, VCS kind, Unity
+  version/license, Slack channel, and the secret registry. Machine-independent facts only --
+  environment facts (server URL, access token) are per-user editor settings, never committed.
+  The project key is the join key: the server resolves repo, credentials, secrets and license
+  from it alone.
 - **Post-build actions** -- a typed pipeline run on the built artifact (BuildIPA, AscUpload,
   GooglePlayUpload, SteamUpload, EpicUpload, ItchUpload, ExtractApk, AdbInstall, Notarize,
   FtpUpload, ServerDeploy). Each action declares what it *Consumes* and *Produces*, so the chain

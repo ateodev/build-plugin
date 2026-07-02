@@ -432,7 +432,8 @@ namespace Ateo.Build
 
 		private static async Task<TeamCityClient.ProviderCoords> FetchTeamCoordsAsync(ProjectConfig project, string token)
 		{
-			using (TeamCityClient client = new TeamCityClient(project.ServerBaseUrl, token))
+			// The server URL is a per-machine setting (environment fact), not a ProjectConfig field.
+			using (TeamCityClient client = new TeamCityClient(BuildServerSettings.ServerBaseUrl, token))
 			{
 				return await client.GetTeamProviderCoordsAsync(project.TeamId);
 			}

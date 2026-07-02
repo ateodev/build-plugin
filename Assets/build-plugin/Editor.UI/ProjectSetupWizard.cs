@@ -15,8 +15,8 @@ namespace Ateo.Build
 	/// The first-run project-setup wizard (§13.2), a floating <see cref="OdinEditorWindow"/> the Build Panel
 	/// offers when no <see cref="ProjectConfig"/> asset exists. Heavy on auto-detection (project key from the
 	/// product name, repo URL from <c>git remote</c>), it gathers the per-project onboarding facts - project key,
-	/// team (which supplies the secret-provider coords from its TeamCity params), server URL, VCS + a reusable
-	/// checkout credential (the credential registry §13.3), notification target, Unity license (§13.4) - then
+	/// team (which supplies the secret-provider coords from its TeamCity params), VCS + a reusable checkout
+	/// credential (the credential registry §13.3), notification target, Unity license (§13.4) - then
 	/// <c>Create ProjectConfig</c> provisions the pending credential secrets, writes the <c>vcs-&lt;key&gt;</c>
 	/// record and creates <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing lives in the
 	/// Settings view.
@@ -35,6 +35,9 @@ namespace Ateo.Build
 			window.titleContent = new GUIContent("Project Setup");
 			window.minSize = new Vector2(560, 620);
 			window._owner = owner;
+			// The field edits the per-user setting, so it must start from the setting's current value
+			// (the wizard is just a convenient place to adjust it; the value never enters the asset).
+			window._serverBaseUrl = BuildServerSettings.ServerBaseUrl;
 			window.AutoDetect();
 			window.ShowUtility();
 		}
@@ -122,9 +125,18 @@ namespace Ateo.Build
 		}
 
 		[BoxGroup("Project"), PropertyOrder(2)]
-		[OnValueChanged(nameof(FetchTeams))]
-		[SerializeField, LabelText("Server URL"), Tooltip("TeamCity base URL the panel talks to. Re-fetches the team list when changed.")]
-		private string _serverBaseUrl = "https://build.ateonet.work";
+		[OnValueChanged(nameof(OnServerUrlChanged))]
+		[SerializeField, LabelText("Server URL"), Tooltip("TeamCity base URL the panel talks to. A per-machine setting " +
+			"(stored on this machine only, never committed - like the access token). Re-fetches the team list when changed.")]
+		private string _serverBaseUrl = "";
+
+		// The wizard edits the per-user setting in place (write-through on each change): the URL is an
+		// environment fact and must survive the wizard being closed without creating an asset.
+		private void OnServerUrlChanged()
+		{
+			BuildServerSettings.ServerBaseUrl = _serverBaseUrl;
+			FetchTeams();
+		}
 
 		// --- Notifications ------------------------------------------------------------------------------------
 
@@ -637,9 +649,9 @@ namespace Ateo.Build
 			// Slim ProjectConfig (§11.7): repo URL, checkout cred and provider coords are NOT persisted here -
 			// the server reads the repo/cred from the provider vcs-<key> record and the coords from TeamCity team
 			// params. The wizard still uses its own coord fields (fetched) to WRITE those records; see WriteVcsRecord.
+			// The server URL is likewise NOT persisted: it is an environment fact, edited into BuildServerSettings.
 			SetField(project, "_projectKey", _projectKey);
 			SetField(project, "_teamId", _teamId);
-			SetField(project, "_serverBaseUrl", _serverBaseUrl);
 			SetField(project, "_notificationTarget", _notificationTarget);
 			SetField(project, "_vcs", _vcs);
 			SetField(project, "_unityVersion", _unityVersion);

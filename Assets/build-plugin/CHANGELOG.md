@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.0] - 2026-07-02
+### Changed
+- **Server URL is now a per-user editor setting** (Build Panel Settings / project-setup wizard; EditorPrefs, default `https://build.ateonet.work`) - removed from `ProjectConfig` entirely. A committed URL can never be right for every machine; clones now work anywhere without touching project data. Separation principle: `ProjectConfig` = machine-independent project facts; `BuildServerSettings` = environment facts (token, server URL).
+- The panel no longer caches a base URL at all (reads the setting live - supersedes the 0.7.3 stale-URL fix with a stronger form).
+
 ## [0.9.0] - 2026-07-02
 ### Added (build notifications - scheme-dispatched, Slack now, Discord-ready)
 - **`ProjectConfig` gains `Notification Target`** (replaces the Slack-specific channel field - hard rename, no migration shim): a scheme-tagged target like `slack:C0123ABC456`; empty = no notifications. Delivered server-side by the executor scripts (the plugin stays delivery-ignorant); the scheme picks the transport, so `discord:<provider-ref>` and future channels slot in agent-side with zero plugin changes.
