@@ -52,11 +52,13 @@ namespace Ateo.Build
 		[SerializeField, Tooltip("Output file name without extension. Tokens: {project} {version} {code}. Empty = builder default.")]
 		private string _outputFileName;
 
-		[SerializeField, Tooltip("Ordered steps run BEFORE the player build.")]
-		private List<BuildStep> _preSteps = new List<BuildStep>();
+		[SerializeReference, Tooltip("Ordered steps run BEFORE the player build - embedded managed objects, like the " +
+			"actions list. Steps WRAP the build (shape it, then restore state); actions consume its output.")]
+		private List<BuildStep> _preSteps = new();
 
-		[SerializeField, Tooltip("Ordered steps run AFTER the player build.")]
-		private List<BuildStep> _postSteps = new List<BuildStep>();
+		[SerializeReference, Tooltip("Ordered steps run AFTER the player build, on success AND failure (the restore " +
+			"half of the wrap) - a step that wants the output files or a secret should be a post-build action instead.")]
+		private List<BuildStep> _postSteps = new();
 
 		[SerializeReference, Tooltip("Ordered post-build actions (v2 contract) run on the built artifact - typed " +
 			"file-based pipeline keyed by Consumes/Produces, separate from the BuildStep lists.")]

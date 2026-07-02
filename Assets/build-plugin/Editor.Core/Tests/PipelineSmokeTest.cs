@@ -14,7 +14,9 @@ namespace Ateo.Build.Tests
 	/// prove the pipeline actually RUNS (compile alone can't), asserts the declarative artifact-flow gate
 	/// rejects an action whose <c>Consumes</c> kind was never produced, then LINTS every SHIPPED catalog
 	/// action's declarations (DisplayName / Consumes / Produces / RequiredSecrets / HostRequirements) for
-	/// internal consistency - declarations only, no tool execution. Run it from CI/CLI with:
+	/// internal consistency - declarations only, no tool execution - and proves the embedded
+	/// <see cref="BuildStep"/> framework round-trips a definition's [SerializeReference] lists. Run it from
+	/// CI/CLI with:
 	///   Unity ... -batchmode -quit -executeMethod Ateo.Build.Tests.PipelineSmokeTest.RunPipelineSmoke
 	/// Exits 0 when every check passes, 1 otherwise. Lives under Tests/ so it is obviously a sample, not a real
 	/// catalog action (§10.2).
@@ -53,6 +55,37 @@ namespace Ateo.Build.Tests
 			{
 				Executed = true;
 				return Task.FromResult(ActionResult.Ok());
+			}
+		}
+
+		/// <summary>A synthetic embedded <see cref="BuildStep"/> - proves the [SerializeReference] step lists
+		/// round-trip a concrete subclass (with field data) and dispatch its hooks through the base type.</summary>
+		private sealed class SmokeTestStep : BuildStep
+		{
+			public static bool PreRan;
+			public static bool PostRan;
+
+			[SerializeField] private string _marker;
+
+			public SmokeTestStep()
+			{
+			}
+
+			public SmokeTestStep(string marker)
+			{
+				_marker = marker;
+			}
+
+			public string Marker => _marker;
+
+			public override void OnPreBuild(BuildContext context)
+			{
+				PreRan = true;
+			}
+
+			public override void OnPostBuild(BuildContext context, BuildResult result)
+			{
+				PostRan = true;
 			}
 		}
 
@@ -127,6 +160,10 @@ namespace Ateo.Build.Tests
 			//    demand-driven reconciliation the Secrets view and definition banner run on must classify
 			//    needed/registered/unused consistently.
 			failures += LintSecretDemandClassification();
+
+			// 5) Embedded-step framework: a plain-new() BuildStep subclass must round-trip a definition's
+			//    [SerializeReference] step list and dispatch its hooks through the base type.
+			failures += LintBuildStepEmbedding();
 
 			UnityEngine.Object.DestroyImmediate(definition);
 
@@ -274,6 +311,61 @@ namespace Ateo.Build.Tests
 			{
 				UnityEngine.Object.DestroyImmediate(definition);
 				UnityEngine.Object.DestroyImmediate(project);
+			}
+
+			return failures;
+		}
+
+		/// <summary>
+		/// Embedded-step round-trip: a plain-new() <see cref="BuildStep"/> subclass added to a definition's
+		/// [SerializeReference] pre-steps list must survive the EDITOR serializer (EditorJsonUtility carries
+		/// managed references, so no asset scaffolding is needed) with its concrete type and field data, and its
+		/// virtual hooks must dispatch through the base-typed list - exactly how <see cref="BuildRunner"/> invokes
+		/// them (incl. OnPostBuild on a FAILED result: steps restore state even on failure).
+		/// </summary>
+		private static int LintBuildStepEmbedding()
+		{
+			int failures = 0;
+			AndroidBuildDefinition source = ScriptableObject.CreateInstance<AndroidBuildDefinition>();
+			AndroidBuildDefinition restored = ScriptableObject.CreateInstance<AndroidBuildDefinition>();
+
+			try
+			{
+				List<BuildStep> steps = GetPrivateField(source, "_preSteps") as List<BuildStep>;
+				failures += Check(steps != null, "embedded step: definition pre-steps list reachable") ? 0 : 1;
+				steps?.Add(new SmokeTestStep("round-trip"));
+
+				EditorJsonUtility.FromJsonOverwrite(EditorJsonUtility.ToJson(source), restored);
+
+				IReadOnlyList<BuildStep> preSteps = restored.PreSteps;
+				SmokeTestStep step = preSteps != null && preSteps.Count == 1 ? preSteps[0] as SmokeTestStep : null;
+				failures += Check(step != null,
+					"embedded step survives the [SerializeReference] round-trip with its concrete type") ? 0 : 1;
+				failures += Check(step != null && step.Marker == "round-trip",
+					"embedded step field data survives the round-trip") ? 0 : 1;
+
+				SmokeTestStep.PreRan = false;
+				SmokeTestStep.PostRan = false;
+				if (step != null)
+				{
+					BuildStep baseStep = step;
+					BuildContext stepContext = new BuildContext();
+					baseStep.OnPreBuild(stepContext);
+					baseStep.OnPostBuild(stepContext, new BuildResult { Success = false });
+				}
+
+				failures += Check(SmokeTestStep.PreRan && SmokeTestStep.PostRan,
+					"step hooks dispatch through the base type (incl. OnPostBuild on failure)") ? 0 : 1;
+			}
+			catch (Exception exception)
+			{
+				failures++;
+				Debug.LogError("[SmokeTest] FAIL: embedded-step round-trip threw: " + exception);
+			}
+			finally
+			{
+				UnityEngine.Object.DestroyImmediate(source);
+				UnityEngine.Object.DestroyImmediate(restored);
 			}
 
 			return failures;

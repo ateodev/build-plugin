@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0] - 2026-07-02
+### Changed (build steps embedded - like actions)
+- **Secrets view: separate Action column** (dev1 feedback) - Status is text-only ("OK", "not resolving", "not registered", "OK - unused"); the row's button (Register... / Set value... / Fix value...) lives in its own uniform-width Action column.
+- **Pre/post build steps are now embedded in the definition, exactly like post-build actions** (`[SerializeReference]` managed objects): add via the type picker, settings inline, drag to reorder - no more asset-per-step. `BuildStep` is plain C# now; the ScriptableObject base is gone (clean break - no concrete steps or step assets existed anywhere, so nothing to migrate).
+- **The rule of thumb**: steps WRAP the build (shape it, then restore state - even on failure); post-build actions CONSUME it (the typed artifact pipeline with secrets/host-requirement machinery). If your `OnPostBuild` wants a secret, an external tool, or the output files, you're writing a PostBuildAction in the wrong slot.
+- Steps run only for plugin builds (`BuildRunner`) - deliberately never for regular Unity build-window builds: a build-window build selects no definition, so there's nothing correct to run.
+- Smoke test now proves an embedded step round-trips the editor serializer with its concrete type + field data and dispatches through the base type (incl. `OnPostBuild` on a failed result).
+
 ## [0.14.0] - 2026-07-02
 ### Changed (secrets UX - dev1-grilled redesign)
 - **The Secrets view now shows what your builds actually need**: rows are the union of the registry and every secret required by actions attached to your definitions - a needed-but-unregistered secret appears greyed with a `Register...` button instead of failing at build time. Orphaned entries are tagged `OK - unused` and can be removed (demand-guarded: removing something a build needs is blocked with the reason).

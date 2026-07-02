@@ -127,7 +127,8 @@ namespace Ateo.Build
 			{
 				EditorGUILayout.LabelField("Key", EditorStyles.boldLabel, GUILayout.Width(170));
 				EditorGUILayout.LabelField("Kind", EditorStyles.boldLabel, GUILayout.Width(44));
-				EditorGUILayout.LabelField("Status", EditorStyles.boldLabel, GUILayout.Width(200));
+				EditorGUILayout.LabelField("Status", EditorStyles.boldLabel, GUILayout.Width(130));
+				EditorGUILayout.LabelField("Action", EditorStyles.boldLabel, GUILayout.Width(110));
 				EditorGUILayout.LabelField("Needed by", EditorStyles.boldLabel);
 				GUILayout.Space(64); // the Remove column
 			}
@@ -146,6 +147,7 @@ namespace Ateo.Build
 				EditorGUILayout.LabelField(row.Kind.ToString(), GUILayout.Width(44));
 
 				DrawStatusCell(row, providerAvailable);
+				DrawActionCell(row, providerAvailable);
 
 				string neededBy = row.Consumers != null && row.Consumers.Count > 0
 					? string.Join(", ", row.Consumers)
@@ -159,80 +161,99 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// The single Status cell - text and action in one place. Registered rows: "OK" + Set value... (rotation)
-		/// when the reference resolves; "Fix value..." AS the status when it does not (the label itself signals
-		/// action is required); "unknown" when unprobeable. Unregistered needed rows: the Register... button IS
-		/// the status. Unused rows: an "OK - unused" tag (nothing is broken - the entry is merely orphaned; its
-		/// action is the Remove column). All write buttons disable with the reason when the provider is down.
+		/// The Status cell is TEXT ONLY (dev1: buttons sharing the status column looked bad) - the row's verb
+		/// lives in the separate Action column (<see cref="DrawActionCell"/>). States: "OK" (resolves),
+		/// "not resolving" (registered, vault has nothing at the reference), "not registered" (demand-only row),
+		/// "OK - unused" (orphan - nothing broken), "unknown" (unprobeable).
 		/// </summary>
 		private void DrawStatusCell(SecretDemand.Row row, bool providerAvailable)
 		{
-			const float width = 200f;
+			const float width = 130f;
+			bool? present = providerAvailable && _presence.TryGetValue(row.Key, out bool? probed) ? probed : null;
+
+			string text;
+			string tooltip;
+			if (row.State == SecretDemand.State.NeededUnregistered)
+			{
+				text = "not registered";
+				tooltip = "Needed by the project but has no registry entry yet - use Register... to create one.";
+			}
+			else if (row.State == SecretDemand.State.RegisteredUnused)
+			{
+				text = present == true ? "OK - unused" : present == false ? "unused (not resolving)" : "unused (unknown)";
+				tooltip = "Registered but nothing in the project needs it. Remove deletes only the registry entry - the vault is untouched.";
+			}
+			else if (present == true)
+			{
+				text = "OK";
+				tooltip = "The reference resolves in the vault.";
+			}
+			else if (present == false)
+			{
+				text = "not resolving";
+				tooltip = "The reference does not resolve in the vault - use Fix value... to write it now.";
+			}
+			else
+			{
+				text = "unknown";
+				tooltip = providerAvailable
+					? "Presence could not be probed."
+					: "Presence could not be probed (provider signed out / offline).";
+			}
+
+			EditorGUILayout.LabelField(new GUIContent(text, tooltip), EditorStyles.miniLabel, GUILayout.Width(width));
+		}
+
+		/// <summary>
+		/// The Action column - one button per row, verb matched to the status: Register... (not registered),
+		/// Set value... (OK/unknown - rotation), Fix value... (not resolving; the label signals action is
+		/// REQUIRED, per dev1). Unused rows get no action here - theirs is the Remove column. All write
+		/// buttons disable with the reason when the provider is down.
+		/// </summary>
+		private void DrawActionCell(SecretDemand.Row row, bool providerAvailable)
+		{
+			const float width = 110f;
 			string disabledReason = providerAvailable ? null : "Provider not available - sign in to probe or write.";
 
 			using (new EditorGUILayout.HorizontalScope(GUILayout.Width(width)))
 			{
-				if (row.State == SecretDemand.State.NeededUnregistered)
+				if (row.State == SecretDemand.State.RegisteredUnused)
 				{
-					using (new EditorGUI.DisabledScope(!providerAvailable))
+					GUILayout.Space(width); // no action - Remove (trailing column) is this row's verb
+					return;
+				}
+
+				using (new EditorGUI.DisabledScope(!providerAvailable))
+				{
+					if (row.State == SecretDemand.State.NeededUnregistered)
 					{
 						if (GUILayout.Button(new GUIContent("Register...",
 							disabledReason ?? ("Create or select the vault secret for '" + row.Key + "' and record its reference.")),
-							GUILayout.Width(110)))
+							GUILayout.Width(width)))
 						{
 							OpenRegisterDialog(row);
 						}
+						return;
 					}
 
-					GUILayout.FlexibleSpace();
-					return;
-				}
-
-				bool? present = providerAvailable && _presence.TryGetValue(row.Key, out bool? probed) ? probed : null;
-
-				if (row.State == SecretDemand.State.RegisteredUnused)
-				{
-					string tag = present == true ? "OK - unused" : present == false ? "unused (not resolving)" : "unused (unknown)";
-					EditorGUILayout.LabelField(new GUIContent(tag,
-						"Registered but nothing in the project needs it. Remove deletes only the registry entry - the vault is untouched."),
-						EditorStyles.miniLabel, GUILayout.Width(150));
-					GUILayout.FlexibleSpace();
-					return;
-				}
-
-				if (present == true)
-				{
-					EditorGUILayout.LabelField(new GUIContent("OK", "The reference resolves in the vault."), GUILayout.Width(30));
-					if (GUILayout.Button(new GUIContent("Set value...", "Write a NEW value (rotation). The current value is never shown."),
-						GUILayout.Width(90)))
+					bool? present = providerAvailable && _presence.TryGetValue(row.Key, out bool? probed) ? probed : null;
+					if (present == false)
 					{
-						OpenSetValueDialog(row);
+						if (GUILayout.Button(new GUIContent("Fix value...",
+							"The reference does not resolve in the vault - write its value now."), GUILayout.Width(width)))
+						{
+							OpenSetValueDialog(row);
+						}
 					}
-				}
-				else if (present == false)
-				{
-					// The button IS the status: registered, but the vault has nothing at the reference.
-					if (GUILayout.Button(new GUIContent("Fix value...",
-						"The reference does not resolve in the vault - write its value now."), GUILayout.Width(110)))
-					{
-						OpenSetValueDialog(row);
-					}
-				}
-				else
-				{
-					EditorGUILayout.LabelField(new GUIContent("unknown",
-						disabledReason ?? "Presence could not be probed (provider signed out / offline)."), GUILayout.Width(70));
-					using (new EditorGUI.DisabledScope(!providerAvailable))
+					else
 					{
 						if (GUILayout.Button(new GUIContent("Set value...",
-							disabledReason ?? "Write a NEW value. The current value is never shown."), GUILayout.Width(90)))
+							disabledReason ?? "Write a NEW value (rotation). The current value is never shown."), GUILayout.Width(width)))
 						{
 							OpenSetValueDialog(row);
 						}
 					}
 				}
-
-				GUILayout.FlexibleSpace();
 			}
 		}
 

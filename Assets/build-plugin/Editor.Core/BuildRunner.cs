@@ -174,7 +174,9 @@ namespace Ateo.Build
 					}
 				}
 
-				// 9. Legacy post-build steps (always run, success or failure).
+				// 9. Post-build steps - ALWAYS run, success or failure: they are the restore half of the wrap
+				//    (steps shape the build, then put state back), unlike the action pipeline above, which only
+				//    consumes a successful build's output. A throwing step must not eat the others' restores.
 				foreach (BuildStep step in definition.PostSteps)
 				{
 					if (step == null) continue;
@@ -185,7 +187,7 @@ namespace Ateo.Build
 					}
 					catch (Exception exception)
 					{
-						Debug.LogWarning("[Build] post-step '" + step.name + "' threw: " + exception.Message);
+						Debug.LogWarning("[Build] post-step '" + step.GetType().Name + "' threw: " + exception.Message);
 					}
 				}
 
