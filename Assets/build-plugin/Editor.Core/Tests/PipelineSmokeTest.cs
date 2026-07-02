@@ -123,6 +123,11 @@ namespace Ateo.Build.Tests
 			//    runner reason about must be internally consistent. Reflection-only - no tool ever executes.
 			failures += LintShippedActionDeclarations();
 
+			// 4) SecretDemand classification on a synthetic in-memory case (no asset/scene scaffolding): the
+			//    demand-driven reconciliation the Secrets view and definition banner run on must classify
+			//    needed/registered/unused consistently.
+			failures += LintSecretDemandClassification();
+
 			UnityEngine.Object.DestroyImmediate(definition);
 
 			Debug.Log(failures == 0 ? "[SmokeTest] RESULT: ALL PASS" : "[SmokeTest] RESULT: FAILURES=" + failures);
@@ -210,6 +215,109 @@ namespace Ateo.Build.Tests
 			// Zero discovered actions would mean the reflection sweep silently broke - that must fail, not pass.
 			failures += Check(linted > 0, "shipped action catalog discovered (" + linted + " actions linted)") ? 0 : 1;
 			return failures;
+		}
+
+		/// <summary>
+		/// Synthetic <see cref="SecretDemand"/> case: an Android definition with wired signing (demands its two
+		/// env-key names) and a GooglePlayUpload action (demands its declared File secret), against a registry
+		/// holding one of the needed keys plus one stale orphan. Asserts each key lands in the right
+		/// <see cref="SecretDemand.State"/> and that consumers name who needs a key. Pure in-memory
+		/// ScriptableObjects + reflection (the same private-field access the wizard/runner already rely on).
+		/// </summary>
+		private static int LintSecretDemandClassification()
+		{
+			int failures = 0;
+			AndroidBuildDefinition definition = ScriptableObject.CreateInstance<AndroidBuildDefinition>();
+			ProjectConfig project = ScriptableObject.CreateInstance<ProjectConfig>();
+
+			try
+			{
+				SetPrivateField(definition, "_definitionName", "SmokeSecrets");
+				SetPrivateField(definition, "_androidSigning",
+					new AndroidSigning("keystores/smoke.keystore", "release", "ANDROID_KEYSTORE_PASS", "ANDROID_KEYALIAS_PASS"));
+
+				List<PostBuildAction> actions = GetPrivateField(definition, "_postBuildActions") as List<PostBuildAction>;
+				failures += Check(actions != null, "secret demand: definition action list reachable") ? 0 : 1;
+				actions?.Add(new GooglePlayUpload());
+
+				List<SecretDeclaration> registry = GetPrivateField(project, "_secretRegistry") as List<SecretDeclaration>;
+				failures += Check(registry != null, "secret demand: project registry reachable") ? 0 : 1;
+				registry?.Add(new SecretDeclaration("ANDROID_KEYSTORE_PASS", "Android keystore password.",
+					SecretKind.String, "op://Vault/smoke-android-signing/storepass"));
+				registry?.Add(new SecretDeclaration("STALE_KEY", "No longer used by anything.",
+					SecretKind.String, "op://Vault/smoke-stale/value"));
+
+				List<SecretDemand.Row> rows = SecretDemand.Classify(project, new BuildDefinition[] { definition });
+
+				failures += Check(StateOf(rows, "ANDROID_KEYSTORE_PASS") == SecretDemand.State.NeededRegistered,
+					"needed + registered key classifies NeededRegistered") ? 0 : 1;
+				failures += Check(StateOf(rows, "ANDROID_KEYALIAS_PASS") == SecretDemand.State.NeededUnregistered,
+					"wired signing key without registry entry classifies NeededUnregistered") ? 0 : 1;
+				failures += Check(StateOf(rows, "PLAY_SERVICE_ACCOUNT_JSON") == SecretDemand.State.NeededUnregistered,
+					"action-declared key without registry entry classifies NeededUnregistered") ? 0 : 1;
+				failures += Check(StateOf(rows, "STALE_KEY") == SecretDemand.State.RegisteredUnused,
+					"registered key nothing needs classifies RegisteredUnused") ? 0 : 1;
+
+				SecretDemand.Row playRow = FindRow(rows, "PLAY_SERVICE_ACCOUNT_JSON");
+				failures += Check(playRow != null && playRow.Kind == SecretKind.File,
+					"demanded key carries the declaring requirement's kind (File)") ? 0 : 1;
+				failures += Check(playRow != null && playRow.Consumers.Count == 1 &&
+					playRow.Consumers[0].Contains("Upload to Google Play") && playRow.Consumers[0].Contains("SmokeSecrets"),
+					"consumer names the action and the definition label") ? 0 : 1;
+			}
+			catch (Exception exception)
+			{
+				failures++;
+				Debug.LogError("[SmokeTest] FAIL: secret demand classification threw: " + exception);
+			}
+			finally
+			{
+				UnityEngine.Object.DestroyImmediate(definition);
+				UnityEngine.Object.DestroyImmediate(project);
+			}
+
+			return failures;
+		}
+
+		private static SecretDemand.Row FindRow(List<SecretDemand.Row> rows, string key)
+		{
+			return rows.Find(row => row.Key == key);
+		}
+
+		private static SecretDemand.State? StateOf(List<SecretDemand.Row> rows, string key)
+		{
+			SecretDemand.Row row = FindRow(rows, key);
+			return row != null ? row.State : (SecretDemand.State?)null;
+		}
+
+		private static void SetPrivateField(object target, string name, object value)
+		{
+			Type type = target.GetType();
+			while (type != null)
+			{
+				FieldInfo field = type.GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+				if (field != null)
+				{
+					field.SetValue(target, value);
+					return;
+				}
+
+				type = type.BaseType;
+			}
+		}
+
+		private static object GetPrivateField(object target, string name)
+		{
+			Type type = target.GetType();
+			while (type != null)
+			{
+				FieldInfo field = type.GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
+				if (field != null) return field.GetValue(target);
+
+				type = type.BaseType;
+			}
+
+			return null;
 		}
 
 		private static bool Check(bool condition, string label)

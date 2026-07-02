@@ -347,6 +347,7 @@ namespace Ateo.Build
 		private void DrawConfigureHeader()
 		{
 			DrawFolderValidation();
+			DrawSecretValidation();
 			SirenixEditorGUI.BeginBox("Post-build actions");
 			{
 				EditorGUILayout.LabelField(
@@ -425,6 +426,53 @@ namespace Ateo.Build
 
 			EditorGUILayout.HelpBox("This " + token + " definition lives in the wrong folder ('" + assetPath +
 				"') - move it to " + expectedFolder + "/.", MessageType.Error);
+			GUILayout.Space(4);
+		}
+
+		// Demand-driven secrets banner (Secrets UX spec #6): the keys THIS definition needs (its attached actions'
+		// declared RequiredSecrets + its wired signing keys, via SecretDemand) that have no registry entry yet.
+		// "Attached", not the Build tab's per-run toggles: those are transient skip choices and unchecking one for
+		// a run must not hide a registration error in the committed configuration. Same HelpBox style as the
+		// folder validation above; each key gets a Register... button into the SAME shared dialog the Secrets
+		// view uses. Recomputed per pass - the lists involved are tiny and it keeps the banner truthful after
+		// a dialog registers a key.
+		private void DrawSecretValidation()
+		{
+			ProjectConfig project = _owner != null ? _owner.Project : null;
+			List<SecretDemand.NeededSecret> missing = SecretDemand.UnregisteredFor(project, _definition);
+			if (missing.Count == 0) return;
+
+			List<string> keys = new List<string>();
+			foreach (SecretDemand.NeededSecret secret in missing) keys.Add(secret.Key);
+
+			EditorGUILayout.HelpBox(missing.Count + (missing.Count == 1 ? " secret is" : " secrets are") +
+				" not registered: " + string.Join(", ", keys) + ". Builds using them will fail until they are " +
+				"registered in the project secret registry.", MessageType.Error);
+
+			if (project == null)
+			{
+				EditorGUILayout.LabelField("Run the project-setup wizard first to get a ProjectConfig to register into.",
+					EditorStyles.miniLabel);
+				GUILayout.Space(4);
+				return;
+			}
+
+			using (new EditorGUILayout.HorizontalScope())
+			{
+				foreach (SecretDemand.NeededSecret secret in missing)
+				{
+					SecretDemand.NeededSecret local = secret;
+					if (GUILayout.Button(new GUIContent("Register " + local.Key + "...",
+						local.Description + " Needed by " + string.Join("; ", local.Consumers) + "."),
+						GUILayout.ExpandWidth(false)))
+					{
+						SecretRegisterDialog.OpenForRegister(project, local.Key, local.Kind, local.Description,
+							local.Consumers.ToArray(), keyEditable: false, onRegistered: null,
+							onDone: () => _owner.Repaint()); // the banner recomputes on the next pass - force one
+					}
+				}
+			}
+
 			GUILayout.Space(4);
 		}
 

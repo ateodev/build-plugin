@@ -19,11 +19,14 @@ namespace Ateo.Build
 		/// <summary>Signing key alias.</summary>
 		public string KeyAlias;
 
-		/// <summary>Name of the env var holding the keystore password (default "ANDROID_KEYSTORE_PASS").</summary>
+		/// <summary>Name of the env var holding the keystore password (default "ANDROID_KEYSTORE_PASS").
+		/// Doubles as the LOGICAL registry key the value is resolved by (agent-side and locally).</summary>
+		[SecretKeyField(SecretKind.String)]
 		public string KeystorePasswordEnv;
 
 		/// <summary>Name of the env var holding the key-alias password (default "ANDROID_KEYALIAS_PASS";
-		/// falls back to the keystore password when unset).</summary>
+		/// falls back to the keystore password when unset). Doubles as the logical registry key.</summary>
+		[SecretKeyField(SecretKind.String)]
 		public string KeyAliasPasswordEnv;
 
 		#endregion
@@ -68,10 +71,14 @@ namespace Ateo.Build
 		/// <summary>Provisioning profile name / specifier (e.g. "match AppStore com.ateo.game").</summary>
 		public string ProvisioningProfile;
 
-		/// <summary>Name of the env var holding the fastlane match passphrase (default "MATCH_PASSWORD").</summary>
+		/// <summary>Name of the env var holding the fastlane match passphrase (default "MATCH_PASSWORD").
+		/// Doubles as the LOGICAL registry key the value is resolved by (agent-side and locally).</summary>
+		[SecretKeyField(SecretKind.String)]
 		public string MatchPasswordEnv;
 
-		/// <summary>Name of the env var holding the App Store Connect API key reference (default "ASC_API_KEY").</summary>
+		/// <summary>Name of the env var holding the App Store Connect API key reference (default "ASC_API_KEY").
+		/// Doubles as the logical registry key.</summary>
+		[SecretKeyField(SecretKind.File)]
 		public string AscApiKeyEnv;
 
 		#endregion

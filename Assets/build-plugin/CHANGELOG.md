@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0] - 2026-07-02
+### Changed (secrets UX - dev1-grilled redesign)
+- **The Secrets view now shows what your builds actually need**: rows are the union of the registry and every secret required by actions attached to your definitions - a needed-but-unregistered secret appears greyed with a `Register...` button instead of failing at build time. Orphaned entries are tagged `OK - unused` and can be removed (demand-guarded: removing something a build needs is blocked with the reason).
+- **One Status column that IS the action**: `OK` (with a neutral `Set value...` for rotation), `Fix value...` when the reference does not resolve in the vault, `Register...`, `OK - unused`. Provider sign-in status shown once in the header; signed out disables all writes with the reason.
+- **Register/set-value dialog** (shared by the Secrets view, the new definition banner, and the wizard): create-new (convention-derived vault item + value entered now) or use-existing (picked from the vault) - no free-text references anywhere. Strictly write-only: secret values are never displayed.
+- **Definitions warn at authoring time**: a Configure-tab banner lists unregistered secrets with per-key Register buttons.
+- **`[SecretKeyField]` dropdown**: fields holding a logical secret key (Android keystore/alias passwords, iOS match password, ASC key) render as a dropdown of registry keys filtered by kind, with inline "Register new...".
+
 ## [0.13.0] - 2026-07-02
 ### Changed (post-build-action shakedown - actions are now locally runnable and capability-gated)
 - **BuildIPA is self-contained**: it generates a transient Fastfile replicating the proven CI lane (setup_ci under CI only, read-only match, per-target profile pinning, manual-signing gym) instead of depending on a Fastfile that only exists in the CI scripts repo - local panel builds can now run it. Match repo coordinates are definition data (`Match Git Url`/`Match Git Branch`); the unused ASC_API_KEY requirement was dropped.

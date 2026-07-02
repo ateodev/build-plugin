@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text;
-using System.Threading.Tasks;
 using Sirenix.OdinInspector;
 using Sirenix.OdinInspector.Editor;
 using UnityEditor;
@@ -337,7 +336,7 @@ namespace Ateo.Build
 
 			ProjectConfig project = _owner != null ? _owner.Project : null;
 			string projectKey = project != null ? project.ProjectKey : "project";
-			ISecretProvider provider = ResolveTeamProvider(project);
+			ISecretProvider provider = SecretProvisioner.ResolveTeamProvider(project);
 			string item = projectKey + "-android-signing";
 
 			if (generated)
@@ -454,49 +453,10 @@ namespace Ateo.Build
 
 		#region Secrets
 
-		/// <summary>
-		/// The provider used to provision this wizard's secrets. Coordinates are TEAM-level (single source, §11.7):
-		/// fetched from the project's team's TeamCity params, mirroring the setup wizard - NOT the local build-env
-		/// defaults, which may point somewhere other than the team's vault. Those defaults are the fallback only
-		/// when there is no ProjectConfig/team/token or the fetch fails, and that fallback warns visibly.
-		/// </summary>
-		private static ISecretProvider ResolveTeamProvider(ProjectConfig project)
-		{
-			string token = BuildServerSettings.Token;
-			if (project == null || string.IsNullOrEmpty(project.TeamId) || string.IsNullOrEmpty(token))
-			{
-				Debug.LogWarning("[New Definition] No ProjectConfig team / server token to fetch the team's provider " +
-					"coordinates from - provisioning with LOCAL DEFAULT coordinates instead of the team's.");
-				return SecretProviders.ForBuild();
-			}
-
-			try
-			{
-				TeamCityClient.ProviderCoords coords = WizardShell.RunSync(() => FetchTeamCoordsAsync(project, token));
-				ISecretProvider provider = SecretProviders.Resolve(coords.Scheme, coords.Config, coords.Account);
-				if (provider != null) return provider;
-
-				Debug.LogWarning("[New Definition] Team '" + project.TeamId + "' declares no known provider (scheme '" +
-					coords.Scheme + "') - provisioning with LOCAL DEFAULT coordinates instead of the team's.");
-			}
-			catch (Exception exception)
-			{
-				Debug.LogWarning("[New Definition] Could not fetch team provider coordinates (" + exception.Message +
-					") - provisioning with LOCAL DEFAULT coordinates instead of the team's.");
-			}
-
-			return SecretProviders.ForBuild();
-		}
-
-		private static async Task<TeamCityClient.ProviderCoords> FetchTeamCoordsAsync(ProjectConfig project, string token)
-		{
-			// The server URL is a per-machine setting (environment fact), not a ProjectConfig field.
-			using (TeamCityClient client = new TeamCityClient(BuildServerSettings.ServerBaseUrl, token))
-			{
-				return await client.GetTeamProviderCoordsAsync(project.TeamId);
-			}
-		}
-
+		// The write/register mechanics live in the shared SecretProvisioner (also behind the Secrets view's
+		// register dialog); this wrapper only keeps the wizard's DEGRADE semantics: a failed vault write still
+		// records the convention reference so the created asset stays consistent, with a loud TODO to store the
+		// value manually (the register dialog, by contrast, refuses to register what it could not write).
 		private void ProvisionSecret(ISecretProvider provider, string item, string field, SecretValue value, SecretKind kind,
 			string logicalKey, string description)
 		{
@@ -518,8 +478,7 @@ namespace Ateo.Build
 
 			try
 			{
-				SecretRef created = WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
-				if (!string.IsNullOrEmpty(created.Reference)) reference = created.Reference;
+				reference = SecretProvisioner.WriteSecret(provider, item, field, value).Reference;
 			}
 			catch (Exception exception)
 			{
@@ -527,33 +486,13 @@ namespace Ateo.Build
 					"' (" + exception.Message + "). Recording the reference only - create the secret manually (TODO).");
 			}
 
-			RegisterSecret(logicalKey, description, kind, reference);
-		}
-
-		private void RegisterSecret(string logicalKey, string description, SecretKind kind, string reference)
-		{
 			ProjectConfig project = _owner != null ? _owner.Project : null;
-			if (project == null) return;
-
-			List<SecretDeclaration> registry = GetRegistry(project);
-			if (registry == null) return;
-
-			foreach (SecretDeclaration existing in registry)
-			{
-				if (existing != null && existing.LogicalKey == logicalKey) return; // already registered
-			}
 
 			// UsedBy is human-facing (read standalone in the Secrets view), so record the display label - a
-			// bare "Test" would not say which platform's definition uses the secret.
-			registry.Add(new SecretDeclaration(logicalKey, description, kind, reference, new[] { DisplayLabel }));
-			EditorUtility.SetDirty(project);
-			AssetDatabase.SaveAssetIfDirty(project);
-		}
-
-		private static List<SecretDeclaration> GetRegistry(ProjectConfig project)
-		{
-			FieldInfo field = typeof(ProjectConfig).GetField("_secretRegistry", BindingFlags.NonPublic | BindingFlags.Instance);
-			return field?.GetValue(project) as List<SecretDeclaration>;
+			// bare "Test" would not say which platform's definition uses the secret. Never overwrites: an entry
+			// registered by an earlier wizard run (or by hand) wins over a re-run.
+			SecretProvisioner.RegisterSecret(project, logicalKey, description, kind, reference,
+				new[] { DisplayLabel }, overwriteExisting: false);
 		}
 
 		#endregion
