@@ -8,7 +8,7 @@ namespace Ateo.Build
 	/// <summary>
 	/// Draws any string field tagged <see cref="SecretKeyFieldAttribute"/> (a plain Data-side marker - see its
 	/// doc for why the attribute lives there and not in an Odin processor) as a dropdown of the project
-	/// registry's logical keys, filtered by the attribute's <see cref="SecretKind"/>, plus a "Register new..."
+	/// registry's logical keys, filtered by the attribute's <see cref="SecretKind"/>, plus a "Register new"
 	/// entry that opens the shared <see cref="SecretRegisterDialog"/> pre-filled - so secret-key fields are
 	/// picked from what actually exists instead of free-typed (#29). The current value stays selectable even
 	/// when unregistered (marked), so opening a definition never silently rewrites committed data.
@@ -81,14 +81,14 @@ namespace Ateo.Build
 			{
 				ProjectConfig capturedProject = project;
 				string prefill = current;
-				menu.AddItem(new GUIContent("Register new..."), false, () =>
+				menu.AddItem(new GUIContent("Register new"), false, () =>
 					SecretRegisterDialog.OpenForRegister(capturedProject, prefill, Attribute.Kind,
 						description: "", usedBy: Array.Empty<string>(), keyEditable: true,
 						onRegistered: key => _pendingValue = key, onDone: null));
 			}
 			else
 			{
-				menu.AddDisabledItem(new GUIContent("Register new...  (no ProjectConfig - run the setup wizard)"));
+				menu.AddDisabledItem(new GUIContent("Register new  (no ProjectConfig - run the setup wizard)"));
 			}
 
 			return menu;

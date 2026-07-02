@@ -433,7 +433,7 @@ namespace Ateo.Build
 		// declared RequiredSecrets + its wired signing keys, via SecretDemand) that have no registry entry yet.
 		// "Attached", not the Build tab's per-run toggles: those are transient skip choices and unchecking one for
 		// a run must not hide a registration error in the committed configuration. Same HelpBox style as the
-		// folder validation above; each key gets a Register... button into the SAME shared dialog the Secrets
+		// folder validation above; each key gets a Register button into the SAME shared dialog the Secrets
 		// view uses. Recomputed per pass - the lists involved are tiny and it keeps the banner truthful after
 		// a dialog registers a key.
 		private void DrawSecretValidation()
@@ -462,7 +462,7 @@ namespace Ateo.Build
 				foreach (SecretDemand.NeededSecret secret in missing)
 				{
 					SecretDemand.NeededSecret local = secret;
-					if (GUILayout.Button(new GUIContent("Register " + local.Key + "...",
+					if (GUILayout.Button(new GUIContent("Register " + local.Key,
 						local.Description + " Needed by " + string.Join("; ", local.Consumers) + "."),
 						GUILayout.ExpandWidth(false)))
 					{

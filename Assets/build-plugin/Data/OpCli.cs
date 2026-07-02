@@ -143,7 +143,7 @@ namespace Ateo.Build
 			return titles;
 		}
 
-		public async Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true)
+		public async Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account)
 		{
 			if (value == null) throw new ArgumentNullException(nameof(value));
 
@@ -153,8 +153,10 @@ namespace Ateo.Build
 				return;
 			}
 
-			// Secret string -> concealed 'password' field; a non-secret record pointer (repoUrl/vcsType/...) -> plain 'text'.
-			string assignment = field + (concealed ? "[password]=" : "[text]=") + (value.StringValue ?? string.Empty);
+			// Every String field is written as plain 'text' BY DECISION (dev1): values are protected by vault
+			// access, not field masking - concealed 'password' fields broke field-type consistency and confused
+			// the field picker. File values stay documents (see CreateOrEditDocumentAsync).
+			string assignment = field + "[text]=" + (value.StringValue ?? string.Empty);
 
 			if (await ItemExistsAsync(vault, item, account))
 			{

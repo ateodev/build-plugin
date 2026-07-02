@@ -105,7 +105,7 @@ namespace Ateo.Build.Tests
 				return Task.FromResult(ListTitlesResult);
 			}
 
-			public Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true)
+			public Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account)
 			{
 				LastCreateVault = vault;
 				LastCreateItem = item;
@@ -251,8 +251,8 @@ namespace Ateo.Build.Tests
 			return failures;
 		}
 
-		/// <summary>ListItemsAsync returns only the prefix-matching titles, IN FULL - the cred- prefix is NOT
-		/// stripped (stripping for display is the wizard's concern, not the provider's).</summary>
+		/// <summary>ListItemsAsync returns only the prefix-matching titles, IN FULL - never trimmed (callers
+		/// consume titles verbatim; the prefix is an opaque filter string, here just a fixture namespace).</summary>
 		private static int ListItemsFiltersByPrefix()
 		{
 			int failures = 0;

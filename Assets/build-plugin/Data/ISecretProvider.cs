@@ -31,14 +31,15 @@ namespace Ateo.Build
 		Task<SecretValue> ResolveAsync(SecretRef r, ExecContext ctx);
 
 		/// <summary>
-		/// Read a non-secret structured record (named fields) by item key - the <c>vcs-&lt;project-key&gt;</c>
+		/// Read a non-secret structured record (named fields) by item key - the <c>&lt;project-key&gt;_vcs</c>
 		/// checkout record (§11.7). Returns field-label -&gt; value (the agent reads the same via its own runtime).
 		/// </summary>
 		Task<IReadOnlyDictionary<string, string>> ReadRecordAsync(string item);
 
 		/// <summary>
 		/// List the TITLES of items in the provider's configured vault/config that start with
-		/// <paramref name="prefix"/> (e.g. "cred-") - backs the wizard's select-existing credential reuse (§13.3).
+		/// <paramref name="prefix"/> (a namespace filter, e.g. "&lt;project-key&gt;_"; the empty string lists
+		/// every item) - backs the wizard's select-existing credential reuse (§13.3).
 		/// A provider that cannot enumerate may return an empty list (the UI then falls back to manual entry) -
 		/// do NOT throw for an empty result.
 		/// </summary>
@@ -55,8 +56,8 @@ namespace Ateo.Build
 		SecretRef ReferenceFor(string item, string field, SecretKind kind = SecretKind.String);
 
 		/// <summary>Create or update a secret/record field and return its reference. MANDATORY - the wizard self-serves
-		/// onboarding through it (§11.7). <paramref name="concealed"/> false stores a plain-text field, for the non-secret
-		/// record pointers (repoUrl / vcsType / credentialName) rather than a masked one.</summary>
-		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value, bool concealed = true);
+		/// onboarding through it (§11.7). String fields are always stored as plain text (dev1 decision: values are
+		/// protected by vault access, not field masking); File values are stored as documents.</summary>
+		Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value);
 	}
 }

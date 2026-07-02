@@ -15,10 +15,11 @@ namespace Ateo.Build
 	/// The first-run project-setup wizard (§13.2), a floating <see cref="OdinEditorWindow"/> the Build Panel
 	/// offers when no <see cref="ProjectConfig"/> asset exists. Heavy on auto-detection (project key from the
 	/// product name, repo URL from <c>git remote</c>), it gathers the per-project onboarding facts - project key,
-	/// team (which supplies the secret-provider coords from its TeamCity params), VCS + a reusable checkout
+	/// team (which supplies the secret-provider coords from its TeamCity params), VCS + a checkout
 	/// credential (the credential registry §13.3), notification target, Unity license (§13.4) - then
-	/// <c>Create ProjectConfig</c> provisions the pending credential secrets, writes the <c>vcs-&lt;key&gt;</c>
-	/// record and creates <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing lives in the
+	/// <c>Create ProjectConfig</c> provisions the pending credential secrets, writes the
+	/// <c>&lt;project-key&gt;_vcs</c> record (named via <see cref="SecretProvisioner.VcsRecordNameFor"/>)
+	/// and creates <c>Assets/BuildConfigs/ProjectConfig.asset</c>. Afterward, editing lives in the
 	/// Settings view.
 	///
 	/// Live integrations (TeamCity, the secret provider, the <c>cm</c>/<c>ssh-keygen</c> CLIs) DEGRADE GRACEFULLY:
@@ -174,8 +175,9 @@ namespace Ateo.Build
 		[SerializeField, LabelText("Repo URL"), Tooltip("git remote or Plastic repo spec. Auto-detected from 'git remote get-url origin' when available.")]
 		private string _repoUrl = "";
 
-		// Existing reusable credentials (cred-* items) enumerated from the team's provider on team-select - shown
-		// WITHOUT the cred- prefix (the vcs-record's credentialName is the bare name; the agent re-applies the prefix).
+		// Existing credentials enumerated from the team's provider on team-select - item titles shown VERBATIM:
+		// the vcs record's credentialName IS the item title (no hidden prefixes on either side since the
+		// 2026-07-02 naming unification; the agent reads the item by exactly this name).
 		[NonSerialized] private List<string> _existingCredentials = new List<string>();
 
 		// Defaults to AddNew (not SelectExisting): until a team's provider proves there is something to select,
@@ -187,12 +189,21 @@ namespace Ateo.Build
 
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(IsSelectExisting)), PropertyOrder(23)]
 		[ValueDropdown(nameof(_existingCredentials))]
-		[SerializeField, LabelText("Credential name"), Tooltip("Existing reusable checkout credentials from the vault registry (its cred-* items). The credential already exists, so no key generation or verification is needed.")]
+		[SerializeField, LabelText("Credential name"), Tooltip("Existing checkout-credential items from the vault registry, by verbatim item title (the record's credentialName stores exactly this title). The credential already exists, so no key generation or verification is needed.")]
 		private string _credentialName = "";
 
-		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(IsAddNew)), PropertyOrder(24)]
-		[InfoBox("Name every credential by convention <host>-<account/scope> - e.g. team-github, uvcs-ci-bot, " +
-			"clientx-deploy. The credential is reusable: one entry serves every repo it can reach.", InfoMessageType.None)]
+		// Per-repo deploy keys are AUTO-NAMED (project-bound convention) - no free-text name field: a deploy key
+		// can never be reused (GitHub rejects one key on two repos), so a user-chosen "reusable" name would lie.
+		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(IsAddNewDeployKey)), PropertyOrder(24)]
+		[InfoBox("Per-repo deploy keys are auto-named <project>_<host>-deploy-key - they are bound to one repo by " +
+			"nature, so the item carries the project's name.", InfoMessageType.None)]
+		[ShowInInspector, DisplayAsString, LabelText("Credential name")]
+		private string DeployKeyNameDisplay => DeployKeyItemName();
+
+		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(IsAddNewNamed)), PropertyOrder(24)]
+		[InfoBox("Shared/reusable credentials use a bare <host>-<account> name - e.g. plastic-ci-bot, uvcs-ci-bot, " +
+			"clientx-bot. One entry serves every repo the account can reach (per-repo deploy keys are auto-named " +
+			"<project>_<host>-deploy-key instead).", InfoMessageType.None)]
 		[SerializeField, LabelText("New credential name")]
 		private string _newCredentialName = "";
 
@@ -253,6 +264,11 @@ namespace Ateo.Build
 		private bool HasExistingCredentials => _existingCredentials != null && _existingCredentials.Count > 0;
 		private bool IsSelectExisting => _credentialMode == CredentialMode.SelectExisting;
 		private bool IsAddNew => _credentialMode == CredentialMode.AddNew;
+
+		// The name-field split: a per-repo DEPLOY key is auto-named (project-bound convention), every other
+		// credential type is reusable and user-named bare (a bot SSH key, Plastic user/pass, a UVCS PAT).
+		private bool IsAddNewDeployKey => IsAddNew && _credentialType == CredentialType.GitDeployKey;
+		private bool IsAddNewNamed => IsAddNew && _credentialType != CredentialType.GitDeployKey;
 		private bool ShowGitKey => IsAddNew && (_credentialType == CredentialType.GitDeployKey || _credentialType == CredentialType.GitSshKey);
 		private bool HasPublicKey => ShowGitKey && !string.IsNullOrEmpty(_publicKey);
 		private bool ShowPlastic => IsAddNew && _credentialType == CredentialType.PlasticUserpass;
@@ -272,7 +288,11 @@ namespace Ateo.Build
 		[Button("Generate SSH keypair")]
 		private void GenerateSshKeypair()
 		{
-			string name = string.IsNullOrEmpty(_newCredentialName) ? "checkout-key" : _newCredentialName;
+			// A deploy key takes the auto-derived project-bound item name; a reusable bot SSH key keeps the
+			// user's bare name (the fallback keeps ssh-keygen's comment + the provisioned item name non-empty).
+			string name = _credentialType == CredentialType.GitDeployKey
+				? DeployKeyItemName()
+				: (string.IsNullOrEmpty(_newCredentialName) ? "checkout-key" : _newCredentialName);
 			string temp = Path.Combine(Path.GetTempPath(), "ateo-" + Guid.NewGuid().ToString("N"));
 
 			try
@@ -308,12 +328,13 @@ namespace Ateo.Build
 		}
 
 		// Host-capability registry (#29): which repo hosts take a read-only SSH deploy/access key and how to add it.
-		// Powers the guidance shown after key generation and on a failed Verify - so the dev never has to hunt for it.
-		private static readonly (string Match, string Name, string Guidance)[] HostRegistry =
+		// Powers the guidance shown after key generation and on a failed Verify - so the dev never has to hunt for
+		// it. Key doubles as the deploy-key item's type-key host group (<project>_<host>-deploy-key).
+		private static readonly (string Match, string Key, string Guidance)[] HostRegistry =
 		{
-			("github.com",    "GitHub",    "GitHub: repo Settings -> Deploy keys -> Add deploy key. Paste the public key; leave 'Allow write access' OFF (read-only)."),
-			("gitlab.com",    "GitLab",    "GitLab: repo Settings -> Repository -> Deploy keys. Paste the public key; do NOT tick write access."),
-			("bitbucket.org", "Bitbucket", "Bitbucket: repo Settings -> Access keys -> Add key. Paste the public key (Bitbucket access keys are read-only)."),
+			("github.com",    "github",    "GitHub: repo Settings -> Deploy keys -> Add deploy key. Paste the public key; leave 'Allow write access' OFF (read-only)."),
+			("gitlab.com",    "gitlab",    "GitLab: repo Settings -> Repository -> Deploy keys. Paste the public key; do NOT tick write access."),
+			("bitbucket.org", "bitbucket", "Bitbucket: repo Settings -> Access keys -> Add key. Paste the public key (Bitbucket access keys are read-only)."),
 		};
 
 		private string HostGuidance()
@@ -325,6 +346,29 @@ namespace Ateo.Build
 			}
 
 			return "Add the public key to your repo host as a read-only deploy/access key.";
+		}
+
+		/// <summary>The repo host's kebab key ("github"/"gitlab"/"bitbucket"), or "git" for an unknown/self-hosted host - still a valid, unambiguous type-key group.</summary>
+		private string HostKey()
+		{
+			string url = _repoUrl ?? "";
+			foreach ((string match, string key, string _) in HostRegistry)
+			{
+				if (url.IndexOf(match, StringComparison.OrdinalIgnoreCase) >= 0) return key;
+			}
+
+			return "git";
+		}
+
+		/// <summary>
+		/// The auto-derived item name for a NEW per-repo deploy key: <c>&lt;project&gt;_&lt;host&gt;-deploy-key</c>
+		/// via <see cref="SecretProvisioner.ItemNameFor(string,string)"/> - the one place that composes conventional
+		/// names. Deploy keys are per-repo by nature (GitHub rejects the same key on two repos), so a project-bound
+		/// name is the truth; only reusable credentials get bare user-chosen names.
+		/// </summary>
+		private string DeployKeyItemName()
+		{
+			return SecretProvisioner.ItemNameFor(ToProjectKey(_projectKey), HostKey() + "-deploy-key");
 		}
 
 		[BoxGroup("Version control/Checkout credential"), ShowIf(nameof(HasPublicKey)), PropertyOrder(33)]
@@ -477,7 +521,7 @@ namespace Ateo.Build
 		}
 
 		// Provider coords are team-level (single source, §11.7): fetched from the team's TeamCity params, never typed
-		// or committed. The wizard uses them only to WRITE the vcs-<key> record + provision secrets.
+		// or committed. The wizard uses them only to WRITE the <project-key>_vcs record + provision secrets.
 		private async Task FetchCoords(TeamCityClient client)
 		{
 			TeamCityClient.ProviderCoords coords = await client.GetTeamProviderCoordsAsync(_teamId);
@@ -579,7 +623,7 @@ namespace Ateo.Build
 			}
 		}
 
-		/// <summary>Fill the select-existing credential dropdown from the provider's cred-* items (the registry §13.3) - best-effort, on team-select.</summary>
+		/// <summary>Fill the select-existing credential dropdown from the provider's items, titles verbatim (the registry §13.3) - best-effort, on team-select.</summary>
 		private void RefreshExistingCredentials()
 		{
 			_existingCredentials = ReadExistingCredentialNames() ?? new List<string>();
@@ -598,27 +642,30 @@ namespace Ateo.Build
 			}
 		}
 
-		/// <summary>Best-effort enumeration of the registry's reusable checkout credentials, or null when the provider can't list.</summary>
+		/// <summary>Best-effort enumeration of the vault's existing checkout credentials (item titles, verbatim), or null when the provider can't list.</summary>
 		private List<string> ReadExistingCredentialNames()
 		{
 			try
 			{
-				// Enumerate through the provider seam (ListItems = titles by prefix), never a vault CLI directly:
+				// Enumerate through the provider seam (empty prefix = every item title), never a vault CLI directly:
 				// any provider that can enumerate fills the dropdown; one that can't returns empty and we degrade
 				// to the add-new flow (the contract says an empty list is a valid answer, not an error).
 				ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
 				if (provider == null) return null;
 
-				IReadOnlyList<string> titles = WizardShell.RunSync(() => provider.ListItemsAsync("cred-"));
+				IReadOnlyList<string> titles = WizardShell.RunSync(() => provider.ListItemsAsync(""));
 				if (titles == null) return null;
 
 				List<string> names = new List<string>();
 				foreach (string title in titles)
 				{
-					// Strip the contract's cred- item prefix: the vcs-record's credentialName is the BARE name
-					// (the agent re-applies the prefix), so the dropdown and the record must speak the same name.
-					string name = title.Substring("cred-".Length);
-					if (!string.IsNullOrEmpty(name) && !names.Contains(name)) names.Add(name);
+					// Titles are offered VERBATIM - the vcs record's credentialName stores exactly the item title
+					// (the old hidden cred- prefix is gone). Only the plugin's OWN non-credential registry
+					// namespaces are excluded (a *_vcs record / the unity-licenses list can structurally never be
+					// a checkout credential); everything else stays, because credential names are free-form now.
+					if (string.IsNullOrEmpty(title)) continue;
+					if (title == "unity-licenses" || title.EndsWith("_vcs", StringComparison.Ordinal)) continue;
+					if (!names.Contains(title)) names.Add(title);
 				}
 
 				return names;
@@ -647,8 +694,8 @@ namespace Ateo.Build
 		private void ApplyFields(ProjectConfig project)
 		{
 			// Slim ProjectConfig (§11.7): repo URL, checkout cred and provider coords are NOT persisted here -
-			// the server reads the repo/cred from the provider vcs-<key> record and the coords from TeamCity team
-			// params. The wizard still uses its own coord fields (fetched) to WRITE those records; see WriteVcsRecord.
+			// the server reads the repo/cred from the provider <project-key>_vcs record and the coords from TeamCity
+			// team params. The wizard still uses its own coord fields (fetched) to WRITE those records; see WriteVcsRecord.
 			// The server URL is likewise NOT persisted: it is an environment fact, edited into BuildServerSettings.
 			SetField(project, "_projectKey", _projectKey);
 			SetField(project, "_teamId", _teamId);
@@ -658,9 +705,15 @@ namespace Ateo.Build
 			SetField(project, "_unityLicenseName", _unityLicenseName);
 		}
 
+		/// <summary>
+		/// The credential ITEM TITLE the vcs record's credentialName will store, VERBATIM - select-existing uses
+		/// the picked title as-is; a new deploy key uses the auto-derived project-bound name; other new credentials
+		/// use the user's bare name. The agent reads the item by exactly this title (no hidden prefixes).
+		/// </summary>
 		private string ResolvedCredentialName()
 		{
-			return _credentialMode == CredentialMode.SelectExisting ? _credentialName : _newCredentialName;
+			if (_credentialMode == CredentialMode.SelectExisting) return _credentialName;
+			return _credentialType == CredentialType.GitDeployKey ? DeployKeyItemName() : _newCredentialName;
 		}
 
 		/// <summary>Store any add-new credential material whose secrets weren't already provisioned by a dedicated button (plastic user/pass, a pasted UVCS PAT).</summary>
@@ -698,43 +751,44 @@ namespace Ateo.Build
 		}
 
 		/// <summary>
-		/// Store credential material as a provider secret under the contract item name <c>cred-&lt;name&gt;</c>
-		/// (provider-contract.md): the agent resolves the credential a vcs-record points at as <c>cred-&lt;credentialName&gt;</c>,
-		/// so the wizard must write it with that prefix. Degrades to a logged TODO when the provider is signed out.
+		/// Store credential material as a provider secret under the given item title, VERBATIM (provider-contract.md):
+		/// the vcs record's credentialName holds exactly this title and the agent reads the item by it - the old
+		/// hidden <c>cred-</c> prefix is gone (naming unification 2026-07-02). Degrades to a logged TODO when the
+		/// provider is signed out.
 		/// </summary>
 		private void Provision(string item, string field, SecretValue value, SecretKind kind, string description)
 		{
 			ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
-			string credItem = "cred-" + item;
 			if (provider == null)
 			{
-				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; record '" + credItem + "/" + field + "' manually (TODO).");
+				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; record '" + item + "/" + field + "' manually (TODO).");
 				return;
 			}
 
 			try
 			{
-				WizardShell.RunSync(() => provider.CreateOrUpdateAsync(credItem, field, value)); // off-main-thread: avoids the Editor deadlock
-				Debug.Log("[Project Setup] Stored credential secret " + credItem + "/" + field + " (" + description + ").");
+				WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, value)); // off-main-thread: avoids the Editor deadlock
+				Debug.Log("[Project Setup] Stored credential secret " + item + "/" + field + " (" + description + ").");
 			}
 			catch (Exception exception)
 			{
-				Debug.LogWarning("[Project Setup] Could not store '" + credItem + "/" + field + "' (" + exception.Message +
+				Debug.LogWarning("[Project Setup] Could not store '" + item + "/" + field + "' (" + exception.Message +
 					"). Create it manually (TODO).");
 			}
 		}
 
 		/// <summary>
-		/// Write the per-project VCS record <c>vcs-&lt;project-key&gt;</c> to the provider (§11.7) so the server
-		/// resolves {repoUrl, vcsType, credentialName, cmServer?} from the project key alone, **pre-checkout** — the
-		/// piece that makes onboarding self-service end to end. Degrades to a logged note if the provider is
-		/// unreachable. (Fields are written as plain text, concealed:false - they are non-secret pointers, kept
-		/// inspectable in the vault UI.)
+		/// Write the per-project VCS record <c>&lt;project-key&gt;_vcs</c> (named in ONE place -
+		/// <see cref="SecretProvisioner.VcsRecordNameFor"/>) to the provider (§11.7) so the server resolves
+		/// {repoUrl, vcsType, credentialName, cmServer?} from the project key alone, **pre-checkout** — the
+		/// piece that makes onboarding self-service end to end. credentialName holds the credential item's
+		/// VERBATIM title. Degrades to a logged note if the provider is unreachable. (Like every String write,
+		/// the fields land as plain text - kept inspectable in the vault UI.)
 		/// </summary>
 		private void WriteVcsRecord()
 		{
 			ISecretProvider provider = SecretProviders.Resolve(_secretProviderScheme, _secretProviderConfig, _secretProviderAccount);
-			string item = "vcs-" + _projectKey;
+			string item = SecretProvisioner.VcsRecordNameFor(_projectKey);
 			if (provider == null)
 			{
 				Debug.Log("[Project Setup] No provider for scheme '" + _secretProviderScheme + "'; create the '" + item + "' record manually (TODO).");
@@ -758,8 +812,7 @@ namespace Ateo.Build
 
 		private static void WriteField(ISecretProvider provider, string item, string field, string value)
 		{
-			// concealed:false - these are non-secret record pointers (repoUrl/vcsType/credentialName), stored as plain text.
-			WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty), concealed: false));
+			WizardShell.RunSync(() => provider.CreateOrUpdateAsync(item, field, SecretValue.OfString(value ?? string.Empty)));
 		}
 
 		/// <summary>Provider-contract `vcsType` (§11.7): git / plastic / uvcs. UVCS is distinguished from on-prem Plastic by the chosen credential type.</summary>

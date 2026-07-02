@@ -26,7 +26,7 @@ namespace Ateo.Build
 		/// document references (a document has no field to probe).</summary>
 		Task<bool> ItemExistsAsync(string vault, string item, string account);
 
-		/// <summary>Read every field (label -&gt; value) of an item - backs <see cref="ISecretProvider.ReadRecordAsync"/> (the <c>vcs-</c> record).</summary>
+		/// <summary>Read every field (label -&gt; value) of an item - backs <see cref="ISecretProvider.ReadRecordAsync"/> (the <c>&lt;project-key&gt;_vcs</c> record).</summary>
 		Task<IReadOnlyDictionary<string, string>> GetItemFieldsAsync(string vault, string item, string account);
 
 		/// <summary>All item titles in the given vault (<c>op item list</c>) - backs <see cref="ISecretProvider.ListItemsAsync"/>.
@@ -34,7 +34,8 @@ namespace Ateo.Build
 		Task<IReadOnlyList<string>> ListItemTitlesAsync(string vault, string account);
 
 		/// <summary>Create the item if absent, otherwise edit it, setting <paramref name="field"/> to <paramref name="value"/>
-		/// (string or document). <paramref name="concealed"/> false stores a plain-text field (non-secret record pointers).</summary>
-		Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account, bool concealed = true);
+		/// (string or document). String fields are always written as plain text (dev1 decision: vault access protects
+		/// values, not field masking); File values are stored as documents.</summary>
+		Task CreateOrEditItemAsync(string vault, string item, string field, SecretValue value, string account);
 	}
 }

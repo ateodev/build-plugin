@@ -129,9 +129,9 @@ namespace Ateo.Build
 				: _op.ItemFieldExistsAsync(vault, item, field, _account);
 		}
 
-		public async Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value, bool concealed = true)
+		public async Task<SecretRef> CreateOrUpdateAsync(string item, string field, SecretValue value)
 		{
-			await _op.CreateOrEditItemAsync(_vault, item, field, value, _account, concealed);
+			await _op.CreateOrEditItemAsync(_vault, item, field, value, _account);
 
 			SecretKind kind = value != null && value.IsFile ? SecretKind.File : SecretKind.String;
 			return ReferenceFor(item, field, kind);

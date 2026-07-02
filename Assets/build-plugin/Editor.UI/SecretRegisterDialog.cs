@@ -23,7 +23,7 @@ namespace Ateo.Build
 
 		/// <summary>
 		/// Open in REGISTER mode for a logical key. <paramref name="keyEditable"/> is true only for the
-		/// dropdown drawer's "Register new..." (the key is the user's to invent there); demand-driven callers
+		/// dropdown drawer's "Register new" (the key is the user's to invent there); demand-driven callers
 		/// (Secrets view, definition banner) pass false - the key is fixed by the code that declared it.
 		/// </summary>
 		public static void OpenForRegister(ProjectConfig project, string logicalKey, SecretKind kind, string description,
@@ -305,8 +305,8 @@ namespace Ateo.Build
 				}
 				else if (_fields.Count == 0)
 				{
-					EditorGUILayout.HelpBox("Could not enumerate the item's fields - pick another item or use 'Create new'.",
-						MessageType.Warning);
+					EditorGUILayout.HelpBox("This item has no readable fields (none holds a value) - pick another item " +
+						"or use 'Create new'.", MessageType.Warning);
 				}
 				else
 				{
@@ -368,7 +368,7 @@ namespace Ateo.Build
 			{
 				_filePath = EditorGUILayout.TextField(
 					new GUIContent("File", "The file whose bytes become the secret document."), _filePath);
-				if (GUILayout.Button("Browse...", GUILayout.Width(76)))
+				if (GUILayout.Button("Browse", GUILayout.Width(76)))
 				{
 					string picked = EditorUtility.OpenFilePanel("Secret file", "", "");
 					if (!string.IsNullOrEmpty(picked)) _filePath = picked;
@@ -476,16 +476,25 @@ namespace Ateo.Build
 			try
 			{
 				// ReadRecordAsync returns label -> value; only the LABELS are kept - values are discarded
-				// immediately and never rendered (the dialog is write-only by contract).
+				// immediately and never rendered (the dialog is write-only by contract). A value's LENGTH is
+				// checked, though: 1Password items carry built-in EMPTY fields (e.g. 'password' on a
+				// Login/Password-category item), and offering those phantoms alongside the real field made the
+				// picker a guessing game - only fields that actually hold a value are real choices here.
 				IReadOnlyDictionary<string, string> record = WizardShell.RunSync(() => _provider.ReadRecordAsync(item));
 				_fields = new List<string>();
 				if (record != null)
 				{
-					foreach (string label in record.Keys)
+					foreach (KeyValuePair<string, string> field in record)
 					{
-						if (!string.IsNullOrEmpty(label) && label != "notesPlain") _fields.Add(label);
+						if (string.IsNullOrEmpty(field.Key) || field.Key == "notesPlain") continue;
+						if (string.IsNullOrEmpty(field.Value)) continue; // a phantom built-in - nothing to point at
+
+						_fields.Add(field.Key);
 					}
 				}
+
+				// One real field = no choice to make - preselect it so the reference preview appears immediately.
+				if (_fields.Count == 1) _fieldIndex = 0;
 			}
 			catch (Exception exception)
 			{

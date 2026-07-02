@@ -78,17 +78,39 @@ namespace Ateo.Build
 		/// references that <see cref="TryGetWriteCoordinates"/> later round-trips back into write coordinates.
 		/// The project-key prefix namespaces the item inside the team's SHARED vault; one item per logical key
 		/// keeps registry rows, probes and the vault UI 1:1. The wizard's multi-field Android signing item takes
-		/// its NAME from here too (only its multi-field layout is its own deliberate choice). Team-global items
-		/// (vcs-*/cred-*) have their own conventions - this helper always has a project.
+		/// its NAME from here too (only its multi-field layout is its own deliberate choice), and so does the
+		/// per-project vcs record (<see cref="VcsRecordNameFor"/>) - ONE pattern for every project-bound item.
+		/// Only team-global/reusable items (unity-licenses, shared bot credentials) keep bare descriptive names:
+		/// a fake project prefix on a cross-project item would lie about its scope.
 		/// </summary>
 		public static string ItemNameFor(ProjectConfig project, string logicalKey)
 		{
-			string projectKey = project != null && !string.IsNullOrEmpty(project.ProjectKey) ? project.ProjectKey : "project";
+			return ItemNameFor(project != null ? project.ProjectKey : null, logicalKey);
+		}
+
+		/// <summary>
+		/// String-key overload of <see cref="ItemNameFor(ProjectConfig,string)"/> for callers that run BEFORE a
+		/// ProjectConfig asset exists (the project-setup wizard names vault items from the typed project key).
+		/// </summary>
+		public static string ItemNameFor(string projectKey, string logicalKey)
+		{
+			if (string.IsNullOrEmpty(projectKey)) projectKey = "project";
 
 			// The project key is kebab-folded too: the single underscore separator is only unambiguous when
 			// NEITHER group can contain one.
 			return projectKey.ToLowerInvariant().Replace('_', '-') + "_" +
 				(logicalKey ?? "").ToLowerInvariant().Replace('_', '-');
+		}
+
+		/// <summary>
+		/// The per-project VCS record's item name: <c>&lt;project-key&gt;_vcs</c> (§11.7) - the record the agent
+		/// resolves {repoUrl, vcsType, credentialName, cmServer?} from, pre-checkout. Derived through
+		/// <see cref="ItemNameFor(string,string)"/> ("vcs" is just the type key) so the wizard, the panel and the
+		/// agent scripts all compose the IDENTICAL name from the project key alone - the name exists in one place.
+		/// </summary>
+		public static string VcsRecordNameFor(string projectKey)
+		{
+			return ItemNameFor(projectKey, "vcs");
 		}
 
 		/// <summary>
