@@ -82,6 +82,10 @@ namespace Ateo.Build
 		{
 			if (_loading) return;
 
+			// The panel refresh is the probe-cache boundary (§10 capability gate): tools get installed and
+			// devices get plugged in between refreshes, so re-probe then - never per IMGUI repaint.
+			HostProbe.InvalidateCache();
+
 			_loading = true;
 			owner.RunAsync(LoadBuildsAsync(owner), () => _loading = false);
 		}
@@ -309,15 +313,28 @@ namespace Ateo.Build
 				if (action == null) continue;
 
 				bool applicable = action.RunLocation == RunLocation.Both || action.RunLocation == here;
-				using (new EditorGUI.DisabledScope(!applicable))
+
+				// Local capability gate (§10: capability wins over RunLocation): an action whose
+				// HostRequirements THIS machine can't meet is auto-disabled for a LOCAL run - unchecked and
+				// non-interactable, with the unmet requirement as the visible reason. Server-target toggles
+				// are deliberately NOT gated by local probes: the server may well have the tool/OS this
+				// machine lacks, and its own runner-side gate enforces capability there.
+				string unmet = _target == TriggerTarget.Local && applicable
+					? HostProbe.FindUnmet(action.HostRequirements)
+					: null;
+				bool blocked = unmet != null;
+
+				using (new EditorGUI.DisabledScope(!applicable || blocked))
 				{
 					bool enabled = !_actionEnabled.TryGetValue(action.Id, out bool stored) || stored;
+					string suffix = !applicable ? "  - not for " + here : blocked ? "  - " + unmet : "";
 					bool toggled = EditorGUILayout.ToggleLeft(
-						"   " + action.DisplayName + "  (" + action.RunLocation + ")" + (applicable ? "" : "  - not for " + here),
-						applicable && enabled);
+						"   " + action.DisplayName + "  (" + action.RunLocation + ")" + suffix,
+						applicable && !blocked && enabled);
 
-					// Persist the choice only for applicable actions, so a local<->remote switch never clobbers it.
-					if (applicable) _actionEnabled[action.Id] = toggled;
+					// Persist the choice only for applicable, capability-met actions: a local<->remote switch
+					// (or a tool showing up later) must never clobber what the user actually chose.
+					if (applicable && !blocked) _actionEnabled[action.Id] = toggled;
 				}
 			}
 		}
@@ -692,7 +709,7 @@ namespace Ateo.Build
 
 		private void BuildLocal()
 		{
-			string skip = SkipSet();
+			string skip = LocalSkipSet();
 			string previousSkip = Environment.GetEnvironmentVariable("BUILD_ACTIONS_SKIP");
 			string previousName = Environment.GetEnvironmentVariable("BUILD_NAME");
 			try
@@ -724,6 +741,33 @@ namespace Ateo.Build
 			foreach (KeyValuePair<string, bool> pair in _actionEnabled)
 			{
 				if (!pair.Value && !string.IsNullOrEmpty(pair.Key)) disabled.Add(pair.Key);
+			}
+
+			return string.Join(",", disabled);
+		}
+
+		/// <summary>
+		/// The skip-set for a LOCAL build: the user's unchecks (<see cref="SkipSet"/>) PLUS every action the
+		/// trigger section auto-disabled for unmet local <see cref="HostRequirement"/>s. The auto-disable never
+		/// writes into <see cref="_actionEnabled"/> (that state persists across the local/server switch and
+		/// belongs to the user), so it must be re-derived here - otherwise the runner's hard capability gate
+		/// would fail the build for an action the panel already showed as not runnable on this machine.
+		/// Server triggers keep the plain <see cref="SkipSet"/>: local probes say nothing about the server.
+		/// </summary>
+		private string LocalSkipSet()
+		{
+			List<string> disabled = new List<string>();
+			foreach (KeyValuePair<string, bool> pair in _actionEnabled)
+			{
+				if (!pair.Value && !string.IsNullOrEmpty(pair.Key)) disabled.Add(pair.Key);
+			}
+
+			foreach (PostBuildAction action in _definition.PostBuildActions)
+			{
+				if (action == null || string.IsNullOrEmpty(action.Id) || disabled.Contains(action.Id)) continue;
+				if (action.RunLocation == RunLocation.Remote) continue; // the runner skips these anyway
+
+				if (HostProbe.FindUnmet(action.HostRequirements) != null) disabled.Add(action.Id);
 			}
 
 			return string.Join(",", disabled);

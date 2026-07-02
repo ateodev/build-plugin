@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -10,8 +11,10 @@ namespace Ateo.Build.Tests
 	/// <summary>
 	/// TEST-ONLY headless smoke harness for the post-build-action pipeline (NOT a shipped action). Drives
 	/// <see cref="BuildRunner.ExecutePostBuildActions"/> directly with a couple of tiny in-file sample actions to
-	/// prove the pipeline actually RUNS (compile alone can't), then asserts the declarative artifact-flow gate
-	/// rejects an action whose <c>Consumes</c> kind was never produced. Run it from CI/CLI with:
+	/// prove the pipeline actually RUNS (compile alone can't), asserts the declarative artifact-flow gate
+	/// rejects an action whose <c>Consumes</c> kind was never produced, then LINTS every SHIPPED catalog
+	/// action's declarations (DisplayName / Consumes / Produces / RequiredSecrets / HostRequirements) for
+	/// internal consistency - declarations only, no tool execution. Run it from CI/CLI with:
 	///   Unity ... -batchmode -quit -executeMethod Ateo.Build.Tests.PipelineSmokeTest.RunPipelineSmoke
 	/// Exits 0 when every check passes, 1 otherwise. Lives under Tests/ so it is obviously a sample, not a real
 	/// catalog action (§10.2).
@@ -116,6 +119,10 @@ namespace Ateo.Build.Tests
 			failures += Check(!SmokeTestConsumingAction.Executed, "rejected action did NOT run") ? 0 : 1;
 			failures += Check(gateMessage.Contains("IPA"), "gate message names the missing kind (IPA)") ? 0 : 1;
 
+			// 3) Declaration lint over every SHIPPED catalog action: the declarations the wizard, panel and
+			//    runner reason about must be internally consistent. Reflection-only - no tool ever executes.
+			failures += LintShippedActionDeclarations();
+
 			UnityEngine.Object.DestroyImmediate(definition);
 
 			Debug.Log(failures == 0 ? "[SmokeTest] RESULT: ALL PASS" : "[SmokeTest] RESULT: FAILURES=" + failures);
@@ -125,6 +132,85 @@ namespace Ateo.Build.Tests
 		#endregion
 
 		#region Private Methods
+
+		/// <summary>
+		/// Walks every concrete <see cref="PostBuildAction"/> in the Data assembly (= the shipped catalog; the
+		/// assembly filter excludes these in-file test samples) and lints its DECLARATIONS: DisplayName
+		/// non-empty, SupportedDefinition a definition type, Consumes/Produces defined enum members, Consumes
+		/// satisfiable by SOME OutputKind (via the action's own <see cref="PostBuildAction.CanConsume"/>, so
+		/// widened category actions lint their real gate), every RequiredSecret carrying a unique non-empty key
+		/// + a defined kind + a description, and every HostRequirement carrying a defined kind + non-empty
+		/// value. One PASS/FAIL line per action, listing all of its problems at once. Returns the failure count.
+		/// </summary>
+		private static int LintShippedActionDeclarations()
+		{
+			int failures = 0;
+			int linted = 0;
+			Assembly catalogAssembly = typeof(PostBuildAction).Assembly;
+
+			// The universe every declared Consumes must be satisfiable in: some definition's OutputKind or an
+			// earlier action's Produces - both draw from the same enum, so the full value set is the universe.
+			HashSet<ArtifactKind> everyKind = new HashSet<ArtifactKind>((ArtifactKind[])Enum.GetValues(typeof(ArtifactKind)));
+
+			foreach (Type type in TypeCache.GetTypesDerivedFrom<PostBuildAction>())
+			{
+				if (type.Assembly != catalogAssembly || type.IsAbstract || type.IsGenericTypeDefinition) continue;
+
+				PostBuildAction action;
+				try
+				{
+					action = (PostBuildAction)Activator.CreateInstance(type);
+				}
+				catch (Exception exception)
+				{
+					failures += Check(false, type.Name + ": instantiable via parameterless constructor (" +
+						exception.Message + ")") ? 0 : 1;
+					continue;
+				}
+
+				linted++;
+				List<string> problems = new List<string>();
+
+				if (string.IsNullOrEmpty(action.DisplayName)) problems.Add("DisplayName is empty");
+
+				if (action.SupportedDefinition == null || !typeof(BuildDefinition).IsAssignableFrom(action.SupportedDefinition))
+				{
+					problems.Add("SupportedDefinition is not a BuildDefinition type");
+				}
+
+				if (!Enum.IsDefined(typeof(ArtifactKind), action.Consumes)) problems.Add("Consumes is not a defined ArtifactKind");
+				if (!Enum.IsDefined(typeof(ArtifactKind), action.Produces)) problems.Add("Produces is not a defined ArtifactKind");
+
+				if (!action.CanConsume(everyKind))
+				{
+					problems.Add("Consumes (" + action.Consumes + ") is not satisfiable by any OutputKind");
+				}
+
+				HashSet<string> secretKeys = new HashSet<string>(StringComparer.Ordinal);
+				foreach (SecretRequirement secret in action.RequiredSecrets)
+				{
+					if (string.IsNullOrEmpty(secret.Key)) problems.Add("a RequiredSecret has an empty key");
+					else if (!secretKeys.Add(secret.Key)) problems.Add("secret key '" + secret.Key + "' declared twice");
+
+					if (!Enum.IsDefined(typeof(SecretKind), secret.Kind)) problems.Add("secret '" + secret.Key + "' has an undefined kind");
+					if (string.IsNullOrEmpty(secret.Description)) problems.Add("secret '" + secret.Key + "' has no description");
+				}
+
+				foreach (HostRequirement requirement in action.HostRequirements)
+				{
+					if (!Enum.IsDefined(typeof(HostRequirement.HostKind), requirement.Kind)) problems.Add("a HostRequirement has an undefined kind");
+					if (string.IsNullOrEmpty(requirement.Value)) problems.Add("a " + requirement.Kind + " HostRequirement has an empty value");
+				}
+
+				string label = type.Name + ": declarations consistent" +
+					(problems.Count > 0 ? " - " + string.Join("; ", problems) : "");
+				failures += Check(problems.Count == 0, label) ? 0 : 1;
+			}
+
+			// Zero discovered actions would mean the reflection sweep silently broke - that must fail, not pass.
+			failures += Check(linted > 0, "shipped action catalog discovered (" + linted + " actions linted)") ? 0 : 1;
+			return failures;
+		}
 
 		private static bool Check(bool condition, string label)
 		{

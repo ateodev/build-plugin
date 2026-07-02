@@ -9,7 +9,7 @@ namespace Ateo.Build
 	/// <summary>
 	/// Publishes an Android <see cref="ArtifactKind.AAB"/> (or, via the widened <see cref="CanConsume"/>, an
 	/// <see cref="ArtifactKind.APK"/>) to a Google Play track using fastlane <c>supply</c>. Terminal action; runs
-	/// anywhere (no host requirement). Authenticates with the Play service-account JSON resolved as a File secret.
+	/// on any OS that has fastlane. Authenticates with the Play service-account JSON resolved as a File secret.
 	/// </summary>
 	[System.Serializable]
 	public sealed class GooglePlayUpload : PostBuildAction<AndroidBuildDefinition>
@@ -39,6 +39,13 @@ namespace Ateo.Build
 		public override IEnumerable<SecretRequirement> RequiredSecrets => new[]
 		{
 			new SecretRequirement(PlayServiceAccountKey, "Google Play service-account JSON.", SecretKind.File)
+		};
+
+		public override IEnumerable<HostRequirement> HostRequirements => new[]
+		{
+			// It shells out to fastlane (supply) - without this declaration the capability gate/auto-disable
+			// would let a fastlane-less machine attempt the upload and die on a raw launch failure instead.
+			HostRequirement.Tool("fastlane")
 		};
 
 		#endregion

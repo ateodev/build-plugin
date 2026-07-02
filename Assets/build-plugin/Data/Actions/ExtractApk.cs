@@ -28,9 +28,12 @@ namespace Ateo.Build
 		public override ArtifactKind Consumes => ArtifactKind.AAB;
 		public override ArtifactKind Produces => ArtifactKind.APK;
 
+		// Requirement follows the configured mode: an explicit jar runs via 'java -jar'; otherwise a native
+		// 'bundletool' launcher must be on PATH. Declaring java unconditionally would pass the capability gate
+		// on a java-only machine and then fail launching 'bundletool' (and vice versa).
 		public override IEnumerable<HostRequirement> HostRequirements => new[]
 		{
-			HostRequirement.Tool("java")
+			string.IsNullOrEmpty(_bundletoolJar) ? HostRequirement.Tool("bundletool") : HostRequirement.Tool("java")
 		};
 
 		#endregion

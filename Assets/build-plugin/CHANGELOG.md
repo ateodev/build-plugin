@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0] - 2026-07-02
+### Changed (post-build-action shakedown - actions are now locally runnable and capability-gated)
+- **BuildIPA is self-contained**: it generates a transient Fastfile replicating the proven CI lane (setup_ci under CI only, read-only match, per-target profile pinning, manual-signing gym) instead of depending on a Fastfile that only exists in the CI scripts repo - local panel builds can now run it. Match repo coordinates are definition data (`Match Git Url`/`Match Git Branch`); the unused ASC_API_KEY requirement was dropped.
+- **AscUpload key format fixed**: composes fastlane's JSON api-key descriptor transiently (new registry keys `ASC_KEY_ID`, `ASC_ISSUER_ID`; the raw .p8 never touches disk) instead of handing fastlane a bare .p8 it cannot read.
+- **HostRequirements are enforced**: a shared cached prober (tool-on-PATH, OS, adb device) auto-disables actions with unmet requirements for LOCAL builds - unchecked, locked, reason shown (your own checkbox choices are preserved); a still-enabled action with an unmet requirement fails with the actionable reason instead of a cryptic tool error. Server toggles are not gated by local probes.
+- **Declaration lint** in the pipeline smoke test walks every shipped action (secrets, host requirements, artifact-flow declarations) - it already caught and fixed two: GooglePlayUpload didn't declare its fastlane dependency; ExtractApk demanded java even in native-bundletool mode.
+
 ## [0.12.0] - 2026-07-02
 ### Added
 - **Next-build folder preview** in the Build tab: a live read-only line showing exactly where the next build will land (e.g. `Builds/Linux/Test/1.0_4-my-cool-build/`), composed by the same code that names the real output folder - updates as you edit the build name or bump the build number.

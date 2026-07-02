@@ -4,10 +4,12 @@ namespace Ateo.Build
 {
 	/// <summary>
 	/// An environmental capability a <see cref="PostBuildAction"/> needs in order to run here at all (the hard
-	/// "can it run?" gate, distinct from the author-intent <see cref="RunLocation"/>). Unmet requirements hide /
-	/// grey the action in that context: <c>AdbInstall</c> needs a connected <see cref="HostKind.Device"/>
-	/// (impossible on the headless server); <c>Notarize</c>/<c>BuildIPA</c> need <see cref="HostKind.OperatingSystem"/>
-	/// "macOS" + the <see cref="HostKind.Tool"/> "xcodebuild". See build-plugin-architecture.md §10.
+	/// "can it run?" gate, distinct from the author-intent <see cref="RunLocation"/>). Probed by
+	/// <see cref="HostProbe"/>: the Build Panel auto-disables a local action with an unmet requirement, and the
+	/// runner fails a still-enabled one before executing it. Examples: <c>AdbInstall</c> needs a connected
+	/// <see cref="HostKind.Device"/> (impossible on the headless server); <c>Notarize</c>/<c>BuildIPA</c> need
+	/// <see cref="HostKind.OperatingSystem"/> "macOS" + the <see cref="HostKind.Tool"/> "xcodebuild". See
+	/// build-plugin-architecture.md §10.
 	/// </summary>
 	[Serializable]
 	public struct HostRequirement

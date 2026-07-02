@@ -405,8 +405,12 @@ namespace Ateo.Build
 					continue;
 				}
 
-				// Capability gate (hard): it was configured to run here, so an unmet requirement fails the build.
-				string unmet = FindUnmetRequirement(action);
+				// Capability gate (hard; §10: capability wins over RunLocation). Division of labor with the UI:
+				// the Build Panel AUTO-DISABLES a local action whose HostRequirements are unmet (prevention -
+				// its id lands in the skip-set above), so an action still enabled at this point was explicitly
+				// expected to run here. An unmet requirement therefore FAILS the action - and the build - with
+				// the actionable reason, rather than silently skipping work the author asked for (fail-early).
+				string unmet = HostProbe.FindUnmet(action.HostRequirements);
 				if (unmet != null)
 				{
 					throw new Exception("Post-build action '" + name + "' is configured to run here but cannot: " +
@@ -527,104 +531,6 @@ namespace Ateo.Build
 		{
 			// Coordinates come from the build environment (server) / defaults (local), not ProjectConfig (§11.7).
 			return SecretProviders.ResolveWithBuildCoords(scheme);
-		}
-
-		/// <summary>
-		/// The hard capability gate: returns a human-readable reason for the first UNMET <see cref="HostRequirement"/>,
-		/// or null when all are satisfied. OS is checked against <see cref="Application.platform"/>; Tool by locating
-		/// the executable on PATH; Device is treated as satisfied (can't probe a connected device headlessly).
-		/// </summary>
-		private static string FindUnmetRequirement(PostBuildAction action)
-		{
-			foreach (HostRequirement requirement in action.HostRequirements)
-			{
-				switch (requirement.Kind)
-				{
-					case HostRequirement.HostKind.OperatingSystem:
-						if (!CurrentOsMatches(requirement.Value))
-						{
-							return "requires OS '" + requirement.Value + "' (host is " + Application.platform + ")";
-						}
-
-						break;
-					case HostRequirement.HostKind.Tool:
-						if (!ToolOnPath(requirement.Value))
-						{
-							return "requires tool '" + requirement.Value + "' on PATH";
-						}
-
-						break;
-					case HostRequirement.HostKind.Device:
-						// Device presence can't be checked in a headless build - treated as satisfied for now.
-						break;
-				}
-			}
-
-			return null;
-		}
-
-		private static bool CurrentOsMatches(string os)
-		{
-			if (string.IsNullOrEmpty(os)) return true;
-
-			RuntimePlatform platform = Application.platform;
-			bool isMac = platform == RuntimePlatform.OSXEditor || platform == RuntimePlatform.OSXPlayer;
-			bool isWindows = platform == RuntimePlatform.WindowsEditor || platform == RuntimePlatform.WindowsPlayer;
-			bool isLinux = platform == RuntimePlatform.LinuxEditor || platform == RuntimePlatform.LinuxPlayer;
-
-			switch (os.Trim().ToLowerInvariant())
-			{
-				case "macos":
-				case "osx":
-				case "mac":
-					return isMac;
-				case "windows":
-				case "win":
-					return isWindows;
-				case "linux":
-					return isLinux;
-				default:
-					return false;
-			}
-		}
-
-		private static bool ToolOnPath(string tool)
-		{
-			if (string.IsNullOrEmpty(tool)) return true;
-
-			string path = Environment.GetEnvironmentVariable("PATH") ?? "";
-			RuntimePlatform platform = Application.platform;
-			bool isWindows = platform == RuntimePlatform.WindowsEditor || platform == RuntimePlatform.WindowsPlayer;
-
-			List<string> extensions = new List<string> { "" };
-			if (isWindows)
-			{
-				string pathExt = Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.BAT;.CMD";
-				foreach (string ext in pathExt.Split(';'))
-				{
-					if (!string.IsNullOrEmpty(ext)) extensions.Add(ext);
-				}
-			}
-
-			foreach (string directory in path.Split(Path.PathSeparator))
-			{
-				string trimmed = directory.Trim();
-				if (string.IsNullOrEmpty(trimmed)) continue;
-
-				foreach (string ext in extensions)
-				{
-					try
-					{
-						if (File.Exists(Path.Combine(trimmed, tool + ext))) return true;
-					}
-					catch (Exception)
-					{
-						// Malformed PATH entry - ignore and keep scanning.
-					}
-				}
-			}
-
-			return false;
 		}
 
 		private static void MergeMetadata(BuildResult result, Dictionary<string, string> metadata)
