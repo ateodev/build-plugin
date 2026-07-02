@@ -14,7 +14,9 @@ namespace Ateo.Build
 	/// action declares but nobody registered shows up here (greyed) instead of failing the next build. One
 	/// STATUS column is also the action: "OK" (+ a Set value... rotation affordance), "Fix value..." when the
 	/// reference does not resolve in the vault, "Register..." for needed-but-unregistered keys, and
-	/// "OK - unused" (+ Remove) for orphan entries. Provider status is stated ONCE in the header; when the
+	/// "OK - unused" (+ Remove) for orphan entries. Registered, needed rows additionally carry a right-click
+	/// context menu (Change reference... / Copy reference) - repointing an entry has no column of its own.
+	/// Provider status is stated ONCE in the header; when the
 	/// provider is unavailable every status renders "unknown" and all write buttons are disabled with the
 	/// reason. Presence is probed async via the provider's <see cref="ISecretProvider.ExistsAsync"/>; a
 	/// signed-out provider is tolerated (status "unknown", never an error).
@@ -136,7 +138,8 @@ namespace Ateo.Build
 
 		private void DrawRow(SecretDemand.Row row, bool providerAvailable)
 		{
-			using (new EditorGUILayout.HorizontalScope())
+			// Named scope: its rect (the full row's horizontal extent) anchors the right-click context menu.
+			using (EditorGUILayout.HorizontalScope rowScope = new EditorGUILayout.HorizontalScope())
 			{
 				// Needed-but-unregistered rows are greyed: they exist only as demand, not as committed data yet.
 				using (new EditorGUI.DisabledScope(row.State == SecretDemand.State.NeededUnregistered))
@@ -157,7 +160,43 @@ namespace Ateo.Build
 				EditorGUILayout.LabelField(new GUIContent(neededBy, neededBy), EditorStyles.miniLabel);
 
 				DrawRemoveButton(row);
+				HandleRowContextMenu(rowScope.rect, row, providerAvailable);
 			}
+		}
+
+		/// <summary>
+		/// Right-click verbs for REGISTERED, needed rows: "Change reference..." (repoint/rewrite via the full
+		/// register dialog in overwrite mode - the OK/unknown Action column only rotates the value, so repointing
+		/// needs a home that costs no column) and "Copy reference" (the reference is a POINTER, never the secret
+		/// value - safe on the clipboard). Attached as a plain ContextClick check over the row scope's rect - no
+		/// extra controls, no layout cost. Unregistered and unused rows get NO menu: their verbs (Register... /
+		/// Remove) already exist, and neither has a reference worth copying or repointing. A dangling (not
+		/// resolving) row keeps the menu - its Fix value... button opens the same dialog, but Copy reference has
+		/// no other home there.
+		/// </summary>
+		private void HandleRowContextMenu(Rect rowRect, SecretDemand.Row row, bool providerAvailable)
+		{
+			if (row.Declaration == null || row.State == SecretDemand.State.RegisteredUnused) return;
+
+			Event current = Event.current;
+			if (current.type != EventType.ContextClick || !rowRect.Contains(current.mousePosition)) return;
+
+			GenericMenu menu = new GenericMenu();
+			if (providerAvailable)
+			{
+				menu.AddItem(new GUIContent("Change reference..."), false, () => OpenChangeReferenceDialog(row));
+			}
+			else
+			{
+				// Same rule as the write buttons: no provider, no writes (the disabled entry keeps the verb discoverable).
+				menu.AddDisabledItem(new GUIContent("Change reference..."));
+			}
+
+			menu.AddItem(new GUIContent("Copy reference"), false,
+				() => EditorGUIUtility.systemCopyBuffer = row.Declaration.Reference);
+
+			menu.ShowAsContext();
+			current.Use();
 		}
 
 		/// <summary>
@@ -191,7 +230,8 @@ namespace Ateo.Build
 			else if (present == false)
 			{
 				text = "not resolving";
-				tooltip = "The reference does not resolve in the vault - use Fix value... to write it now.";
+				tooltip = "The reference does not resolve in the vault - use Fix value... to write a fresh value " +
+					"or point it at a different vault item.";
 			}
 			else
 			{
@@ -207,8 +247,10 @@ namespace Ateo.Build
 		/// <summary>
 		/// The Action column - one button per row, verb matched to the status: Register... (not registered),
 		/// Set value... (OK/unknown - rotation), Fix value... (not resolving; the label signals action is
-		/// REQUIRED, per dev1). Unused rows get no action here - theirs is the Remove column. All write
-		/// buttons disable with the reason when the provider is down.
+		/// REQUIRED, per dev1). Fix value... opens the FULL register dialog in overwrite mode, not set-value:
+		/// a dangling reference may point at a DELETED item, and set-value can only rewrite in place - the fix
+		/// must also allow repointing (dev1 got locked into a deleted item). Unused rows get no action here -
+		/// theirs is the Remove column. All write buttons disable with the reason when the provider is down.
 		/// </summary>
 		private void DrawActionCell(SecretDemand.Row row, bool providerAvailable)
 		{
@@ -240,9 +282,10 @@ namespace Ateo.Build
 					if (present == false)
 					{
 						if (GUILayout.Button(new GUIContent("Fix value...",
-							"The reference does not resolve in the vault - write its value now."), GUILayout.Width(width)))
+							"The reference is dangling (nothing in the vault behind it) - write a fresh value, " +
+							"or point the entry at a different vault item."), GUILayout.Width(width)))
 						{
-							OpenSetValueDialog(row);
+							OpenChangeReferenceDialog(row);
 						}
 					}
 					else
@@ -302,6 +345,13 @@ namespace Ateo.Build
 		private void OpenSetValueDialog(SecretDemand.Row row)
 		{
 			SecretRegisterDialog.OpenForSetValue(_project, row.Declaration, onDone: () => Refresh(_owner));
+		}
+
+		private void OpenChangeReferenceDialog(SecretDemand.Row row)
+		{
+			SecretRegisterDialog.OpenForChangeReference(_project, row.Declaration,
+				row.Consumers != null ? row.Consumers.ToArray() : Array.Empty<string>(),
+				onDone: () => Refresh(_owner));
 		}
 
 		#endregion

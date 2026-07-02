@@ -69,16 +69,26 @@ namespace Ateo.Build
 		#region Public Methods - Write / Register
 
 		/// <summary>
-		/// The conventional item name for a logical key provisioned standalone: <c>&lt;project-key&gt;-&lt;key&gt;</c>
-		/// with the key lowercased and '_' folded to '-' (e.g. MATCH_PASSWORD -&gt; <c>dc-match-password</c>).
-		/// The project-key prefix namespaces the item inside the team's SHARED vault (mirrors the contract's
-		/// <c>vcs-&lt;key&gt;</c> / <c>cred-&lt;name&gt;</c> naming); one item per logical key keeps registry rows,
-		/// probes and the vault UI 1:1. (The wizard's multi-field signing item is its own deliberate layout.)
+		/// The conventional item name for a logical key provisioned standalone:
+		/// <c>&lt;project-key&gt;_&lt;type-key&gt;</c> - kebab-case WITHIN each group, one UNDERSCORE between the
+		/// two groups (e.g. STEAM_USER on project build-plugin-test -&gt; <c>build-plugin-test_steam-user</c>).
+		/// The underscore is deliberate: both groups are kebab-case internally (project keys carry dashes, the
+		/// key lowercases and folds '_' to '-'), so a dash join would make the project/key boundary
+		/// unrecoverable - and the split MUST stay machine-parseable, because these names end up inside stored
+		/// references that <see cref="TryGetWriteCoordinates"/> later round-trips back into write coordinates.
+		/// The project-key prefix namespaces the item inside the team's SHARED vault; one item per logical key
+		/// keeps registry rows, probes and the vault UI 1:1. The wizard's multi-field Android signing item takes
+		/// its NAME from here too (only its multi-field layout is its own deliberate choice). Team-global items
+		/// (vcs-*/cred-*) have their own conventions - this helper always has a project.
 		/// </summary>
 		public static string ItemNameFor(ProjectConfig project, string logicalKey)
 		{
 			string projectKey = project != null && !string.IsNullOrEmpty(project.ProjectKey) ? project.ProjectKey : "project";
-			return projectKey + "-" + (logicalKey ?? "").ToLowerInvariant().Replace('_', '-');
+
+			// The project key is kebab-folded too: the single underscore separator is only unambiguous when
+			// NEITHER group can contain one.
+			return projectKey.ToLowerInvariant().Replace('_', '-') + "_" +
+				(logicalKey ?? "").ToLowerInvariant().Replace('_', '-');
 		}
 
 		/// <summary>

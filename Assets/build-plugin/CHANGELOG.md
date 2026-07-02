@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.16.0] - 2026-07-02
+### Changed (secrets - naming convention + repointable references)
+- **Vault item naming convention**: standalone items are now `<project-key>_<type-key>` - kebab-case within each group, a single underscore between the two (e.g. `build-plugin-test_steam-user`). The underscore makes the project/key split machine-unambiguous (both groups use dashes internally); one place (`SecretProvisioner.ItemNameFor`) generates every conventional name - the wizard's Android signing item now takes its name from there too.
+- **Fix value... opens the full register dialog** (create-new prefilled with the convention name / use-existing): a dangling reference can now be REPOINTED at a different vault item, not just rewritten in place - completing either tab overwrites the entry's reference. Previously it opened the set-value dialog, which refuses references it cannot round-trip - a deleted vault item locked you out of your own registry entry.
+- **Change reference... / Copy reference**: right-click a registered row in the Secrets view for a context menu - repoint the entry via the same dialog (clearly titled `Change reference - <KEY>`, key fixed, updates the entry instead of duplicating it), or copy the reference string to the clipboard (the reference is a pointer, never the value).
+
 ## [0.15.0] - 2026-07-02
 ### Changed (build steps embedded - like actions)
 - **Secrets view: separate Action column** (dev1 feedback) - Status is text-only ("OK", "not resolving", "not registered", "OK - unused"); the row's button (Register... / Set value... / Fix value...) lives in its own uniform-width Action column.

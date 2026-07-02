@@ -335,9 +335,11 @@ namespace Ateo.Build
 			bool generated = GenerateKeystore(keystorePath);
 
 			ProjectConfig project = _owner != null ? _owner.Project : null;
-			string projectKey = project != null ? project.ProjectKey : "project";
 			ISecretProvider provider = SecretProvisioner.ResolveTeamProvider(project);
-			string item = projectKey + "-android-signing";
+
+			// One place generates conventional names (SecretProvisioner.ItemNameFor): the signing item groups
+			// its three fields under the pseudo-key ANDROID_SIGNING -> "<project-key>_android-signing".
+			string item = SecretProvisioner.ItemNameFor(project, "ANDROID_SIGNING");
 
 			if (generated)
 			{

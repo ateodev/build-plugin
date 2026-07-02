@@ -9,8 +9,10 @@ namespace Ateo.Build
 	/// <summary>
 	/// The one reusable secrets dialog (Secrets UX spec #3/#4): REGISTER a logical key (create a new vault item
 	/// by convention and write its value now, or point the registry at an existing vault item - no free-text
-	/// reference mode), and SET VALUE (write a new value to an already-registered reference; key + reference
-	/// fixed). Strictly WRITE-ONLY: values are entered masked and never read back or displayed. Opened from the
+	/// reference mode), SET VALUE (write a new value to an already-registered reference; key + reference
+	/// fixed), and CHANGE REFERENCE (the register UI over an EXISTING entry, key fixed - completing it
+	/// OVERWRITES the entry's reference, the escape hatch when the current one dangles or should point
+	/// elsewhere). Strictly WRITE-ONLY: values are entered masked and never read back or displayed. Opened from the
 	/// Secrets view, the definition banner and the secret-key dropdown drawer; all writes go through the shared
 	/// <see cref="SecretProvisioner"/> so item naming and registry rules exist once. Provider-agnostic: only
 	/// <see cref="ISecretProvider"/> verbs are used.
@@ -38,6 +40,32 @@ namespace Ateo.Build
 			window._onRegistered = onRegistered;
 			window._onDone = onDone;
 			window.Initialize(setValueOnly: false, declaration: null);
+			window.ShowUtility();
+		}
+
+		/// <summary>
+		/// Open in CHANGE REFERENCE mode: the full register UI (create-new by convention / use-existing) over an
+		/// ALREADY-registered entry - the key is fixed, and completing either tab REPLACES the entry's reference
+		/// (<see cref="SecretProvisioner.RegisterSecret"/> with overwrite; the entry is updated in place, never
+		/// duplicated). This is how a DANGLING reference gets fixed - write a fresh value under the convention
+		/// name, or repoint at a different vault item - and how a healthy one gets deliberately repointed.
+		/// </summary>
+		public static void OpenForChangeReference(ProjectConfig project, SecretDeclaration declaration, string[] usedBy,
+			Action onDone)
+		{
+			SecretRegisterDialog window = CreateInstance<SecretRegisterDialog>();
+			string logicalKey = declaration != null ? declaration.LogicalKey : "";
+			// The title carries the key: with the register UI reused, only the title says this UPDATES an entry.
+			window.titleContent = new GUIContent("Change reference - " + logicalKey);
+			window._project = project;
+			window._logicalKey = logicalKey;
+			window._kind = declaration != null ? declaration.Kind : SecretKind.String;
+			window._description = declaration != null ? declaration.Description : "";
+			window._usedBy = usedBy ?? Array.Empty<string>();
+			window._keyEditable = false;
+			window._onDone = onDone;
+			window._changeReference = true;
+			window.Initialize(setValueOnly: false, declaration: declaration);
 			window.ShowUtility();
 		}
 
@@ -72,6 +100,7 @@ namespace Ateo.Build
 		[NonSerialized] private Action _onDone;
 
 		[NonSerialized] private bool _setValueOnly;
+		[NonSerialized] private bool _changeReference;
 		[NonSerialized] private SecretDeclaration _declaration;
 		[NonSerialized] private string _writeItem;
 		[NonSerialized] private string _writeField;
@@ -189,6 +218,15 @@ namespace Ateo.Build
 			{
 				EditorGUILayout.LabelField("Description", _description, EditorStyles.wordWrappedMiniLabel);
 			}
+
+			// Change-reference mode: show what is being REPLACED - the one visual difference from plain register.
+			if (_changeReference && _declaration != null && !string.IsNullOrEmpty(_declaration.Reference))
+			{
+				string current = _declaration.Reference;
+				EditorGUILayout.LabelField(
+					new GUIContent("Current reference", "The entry's reference today - completing this dialog replaces it."),
+					new GUIContent(current, current), EditorStyles.miniLabel);
+			}
 		}
 
 		// --- Register mode ----------------------------------------------------------------------------------
@@ -224,7 +262,10 @@ namespace Ateo.Build
 			GUILayout.Space(8);
 			using (new EditorGUI.DisabledScope(!CanCreate()))
 			{
-				if (GUILayout.Button("Create and register", GUILayout.Height(26))) CreateAndRegister(item);
+				// In change-reference mode the verb says UPDATE: same write+register path, but the user must know
+				// the existing entry is repointed (RegisterSecret overwrites in place), not a new one added.
+				string verb = _changeReference ? "Write and update reference" : "Create and register";
+				if (GUILayout.Button(verb, GUILayout.Height(26))) CreateAndRegister(item);
 			}
 		}
 
@@ -282,7 +323,8 @@ namespace Ateo.Build
 			GUILayout.Space(8);
 			using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(reference) || string.IsNullOrEmpty(_logicalKey)))
 			{
-				if (GUILayout.Button("Register (no value written)", GUILayout.Height(26))) RegisterExisting(reference);
+				string verb = _changeReference ? "Update reference (no value written)" : "Register (no value written)";
+				if (GUILayout.Button(verb, GUILayout.Height(26))) RegisterExisting(reference);
 			}
 		}
 
